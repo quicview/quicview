@@ -15,8 +15,16 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio::sync::Notify;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+// Display detection module
+pub mod display_detection;
+
+// Re-export display detection types
+pub use display_detection::{
+    DisplayInfo, DisplayBackend, ServerCapabilities, EffectiveMode, detect_display,
+};
 
 // QUIC server module
 #[cfg(feature = "quic-server")]
@@ -162,6 +170,30 @@ pub async fn run(cfg: &QuicViewConfig) -> Result<ServerHandle> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .try_init();
+
+    // Detect display and determine capabilities
+    let capabilities = ServerCapabilities::detect(cfg.server.display_mode);
+    
+    // Check if we can start with the configured mode
+    if let Err(e) = capabilities.can_start(cfg.server.display_mode) {
+        anyhow::bail!("{}", e);
+    }
+    
+    // Log the effective mode
+    info!(
+        mode = %capabilities.effective_mode,
+        display = %capabilities.display_info.backend,
+        screen_capture = capabilities.screen_capture,
+        terminal = capabilities.terminal,
+        "server capabilities detected"
+    );
+    
+    if !capabilities.display_info.available && cfg.server.display_mode != config::DisplayMode::Terminal {
+        warn!(
+            reason = %capabilities.display_info.description,
+            "no display available, running in terminal-only mode"
+        );
+    }
 
     // Health bind: use `server.health_bind:server.health_port` or default 127.0.0.1:0
     let host = cfg

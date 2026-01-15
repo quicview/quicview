@@ -1,6 +1,53 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Display mode for the server.
+/// 
+/// Controls how the server handles screen capture and display availability.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplayMode {
+    /// Automatically detect display availability.
+    /// Falls back to terminal-only mode if no display is available.
+    #[default]
+    Auto,
+    /// Require a display for screen capture.
+    /// Server will fail to start if no display is available.
+    Desktop,
+    /// Terminal-only mode. No screen capture, only shell access.
+    Terminal,
+}
+
+impl DisplayMode {
+    /// Returns true if this mode allows terminal-only operation.
+    #[must_use]
+    pub fn allows_terminal_fallback(&self) -> bool {
+        matches!(self, Self::Auto | Self::Terminal)
+    }
+    
+    /// Returns true if this mode requires a display.
+    #[must_use]
+    pub fn requires_display(&self) -> bool {
+        matches!(self, Self::Desktop)
+    }
+    
+    /// Returns true if this is terminal-only mode.
+    #[must_use]
+    pub fn is_terminal_only(&self) -> bool {
+        matches!(self, Self::Terminal)
+    }
+}
+
+impl std::fmt::Display for DisplayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Desktop => write!(f, "desktop"),
+            Self::Terminal => write!(f, "terminal"),
+        }
+    }
+}
+
 /// TLS configuration for the server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct TlsConfig {
@@ -29,6 +76,13 @@ pub struct ServerConfig {
     /// Listen port. Defaults to 21116.
     #[serde(default = "default_port")]
     pub port: u16,
+    
+    /// Display mode: auto, desktop, or terminal.
+    /// - auto: Detect display, fallback to terminal if unavailable
+    /// - desktop: Require display, fail if unavailable  
+    /// - terminal: Terminal-only, no screen capture
+    #[serde(default)]
+    pub display_mode: DisplayMode,
     
     /// Authentication token for client connections.
     /// Can also be set via QUICVIEW_TOKEN environment variable.
@@ -109,6 +163,7 @@ impl Default for ServerConfig {
         Self {
             host: default_host(),
             port: default_port(),
+            display_mode: DisplayMode::default(),
             auth_token: None,
             tls_config: None,
             rendezvous_host: None,

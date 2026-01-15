@@ -6,6 +6,12 @@ server:
   host: "0.0.0.0"
   port: 21116
   
+  # Display mode: auto | desktop | terminal
+  # - auto: Detect display, fallback to terminal if unavailable (default)
+  # - desktop: Require display, fail if unavailable
+  # - terminal: Terminal-only, no screen capture
+  display_mode: auto
+  
   # Authentication token for client connections
   # Can also be set via QUICVIEW_TOKEN environment variable
   auth_token: "your-secure-token-here"

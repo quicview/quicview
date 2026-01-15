@@ -27,7 +27,7 @@ client_policy:
 "#;
     fs::write(&file, yaml).expect("write test config");
     let cfg = QuicViewConfig::load_from_file(&file).expect("load config");
-    assert_eq!(cfg.server.rendezvous_host, "id.example");
-    assert_eq!(cfg.server.relay_host, "relay.example");
-    assert!(!cfg.server.tls);
+    assert_eq!(cfg.server.rendezvous_host, Some("id.example".to_string()));
+    assert_eq!(cfg.server.relay_host, Some("relay.example".to_string()));
+    assert_eq!(cfg.server.tls, Some(false));
 }
