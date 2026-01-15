@@ -8,8 +8,10 @@ This guide covers system-level dependencies required for GUI/desktop capture on 
 |----|--------------|-------------------|
 | Ubuntu Server (headless) | Requires X11/Wayland setup | ✅ Works out-of-box |
 | Ubuntu Desktop | ✅ Works out-of-box | ✅ Works out-of-box |
-| Windows Server | ✅ Works out-of-box | N/A |
-| macOS | ✅ Works out-of-box | N/A |
+| Windows Server (Desktop Experience) | ✅ Works out-of-box | ✅ Works out-of-box |
+| Windows Server Core | Requires Desktop Experience feature | ✅ Works out-of-box |
+| Windows Desktop | ✅ Works out-of-box | ✅ Works out-of-box |
+| macOS | ✅ Works out-of-box | N/A (always has Quartz) |
 
 ## Display Modes
 
@@ -169,18 +171,72 @@ exec /usr/local/bin/quicview-server --config /etc/quicview/quicview.yaml
 
 ## Windows
 
+### Windows Desktop / Windows Server with Desktop Experience
+
 Windows includes all necessary dependencies for screen capture. No additional setup required.
 
 ### Windows Server Core (No Desktop Experience)
 
-Windows Server Core does not have a desktop. Options:
+Windows Server Core is a minimal installation without a GUI. QuicView auto-detects this and falls back to terminal-only mode.
 
-1. **Install Desktop Experience feature:**
-   ```powershell
-   Install-WindowsFeature Server-Gui-Shell -Restart
-   ```
+#### Option 1: Terminal-Only Mode (Recommended for Server Core)
 
-2. **Use terminal-only mode** (once implemented)
+No changes needed. QuicView automatically detects Server Core and provides PowerShell/CMD access:
+
+```powershell
+# Just run the server - it will detect Server Core automatically
+.\quicview-server.exe --config quicview.yaml
+
+# Or explicitly set terminal mode
+# In quicview.yaml:
+# server:
+#   display_mode: terminal
+```
+
+#### Option 2: Add Desktop Experience Feature
+
+Convert Server Core to full desktop installation (requires restart, ~2GB disk):
+
+```powershell
+# Check current installation type
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" | Select InstallationType
+
+# Install Desktop Experience (Windows Server 2016/2019/2022)
+Install-WindowsFeature Server-Gui-Shell, Server-Gui-Mgmt-Infra -Restart
+
+# For Windows Server 2012 R2
+Install-WindowsFeature Desktop-Experience -Restart
+```
+
+**Note:** This significantly increases the server footprint. For most server use cases, terminal-only mode is preferred.
+
+#### Option 3: Remote Desktop Services (RDS)
+
+For multi-user GUI access without local desktop:
+
+```powershell
+# Install RDS role
+Install-WindowsFeature Remote-Desktop-Services, RDS-RD-Server -Restart
+
+# Configure RDS licensing and session host
+# (Requires additional configuration and CALs)
+```
+
+#### Detecting Server Core
+
+QuicView checks for Server Core by:
+1. Looking for `dwm.exe` (Desktop Window Manager) - absent on Core
+2. Checking registry `InstallationType` value
+3. Checking for `explorer.exe` shell
+
+```powershell
+# Manual check
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" | Select InstallationType
+# Returns "Server Core" or "Server"
+
+# Check if DWM is running (absent on Server Core)
+Get-Process dwm -ErrorAction SilentlyContinue
+```
 
 ---
 

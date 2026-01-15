@@ -172,13 +172,63 @@ fn verify_x11_connection(display: &str) -> bool {
 fn detect_windows_display() -> DisplayInfo {
     // On Windows, we can check if we're running in a desktop session
     // Windows Server Core without Desktop Experience won't have explorer.exe
+    // and won't have the Desktop Experience feature installed
     
-    // Check for session type
+    if is_windows_server_core() {
+        return DisplayInfo::none("Windows Server Core (no Desktop Experience)");
+    }
+    
     if is_windows_desktop_session() {
         DisplayInfo::available(DisplayBackend::Windows, "Windows desktop session")
     } else {
-        DisplayInfo::none("Windows session without desktop (Server Core?)")
+        DisplayInfo::none("Windows session without desktop shell")
     }
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_server_core() -> bool {
+    use std::process::Command;
+    
+    // Check for Server Core by looking for the Desktop Experience feature
+    // On Server Core, dwm.exe (Desktop Window Manager) won't be running
+    // and certain shell components won't exist
+    
+    // Method 1: Check if Desktop Window Manager is running
+    match Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq dwm.exe", "/NH"])
+        .output()
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.contains("dwm.exe") {
+                // No DWM = Server Core or headless
+                return true;
+            }
+        }
+        Err(_) => {}
+    }
+    
+    // Method 2: Check registry for Server Core installation type
+    // HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\InstallationType
+    match Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "/v",
+            "InstallationType",
+        ])
+        .output()
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains("Server Core") {
+                return true;
+            }
+        }
+        Err(_) => {}
+    }
+    
+    false
 }
 
 #[cfg(target_os = "windows")]
