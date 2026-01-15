@@ -1,0 +1,17 @@
+# cargo-nextest configuration for QuicView
+# See: https://nexte.st/book/configuration.html
+
+[profile.default]
+status-level = "all"
+failure-output = "immediate"
+final-status-level = "flaky"
+
+[profile.ci]
+# CI-optimized profile: fail fast but capture logs
+failure-output = "immediate"
+slow-timeout = { period = "60s", terminate-after = 2 }
+retries = 1
+
+# Example of test filtering (uncomment as needed)
+# [filters]
+# binary = { name = "proto", kind = "lib" }

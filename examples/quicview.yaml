@@ -1,0 +1,37 @@
+# Example QuicView Configuration
+# Client-Server architecture - direct connections over QUIC (primary) or TCP+TLS (fallback)
+
+server:
+  # Bind address and port for incoming connections
+  host: "0.0.0.0"
+  port: 21116
+  
+  # Authentication token for client connections
+  # Can also be set via QUICVIEW_TOKEN environment variable
+  auth_token: "your-secure-token-here"
+  
+  # TLS configuration (strongly recommended for production)
+  tls_config:
+    enabled: true
+    cert_path: "/etc/quicview/cert.pem"
+    key_path: "/etc/quicview/key.pem"
+    # Optional: CA for mutual TLS (client certificate verification)
+    # ca_path: "/etc/quicview/ca.pem"
+  
+  # Health endpoint for load balancer / orchestrator probes
+  health_bind: "127.0.0.1"
+  health_port: 21110
+  
+  # Client-side TLS options (for connecting to other servers)
+  # client_tls_ca_path: "/etc/ssl/certs/ca-bundle.pem"
+  # client_tls_sni: "quicview.example.com"
+
+client_policy:
+  # Require user consent before allowing remote control
+  require_consent: true
+  # Allow mouse/keyboard injection
+  allow_input_control: false
+  # Allow clipboard sync
+  allow_clipboard: false
+  # File transfer (not yet implemented)
+  allow_file_transfer: false

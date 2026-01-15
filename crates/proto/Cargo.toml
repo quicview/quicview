@@ -1,0 +1,22 @@
+[package]
+name = "proto"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "QuicView protocol primitives (our own), minimal TCP/TLS probe and handshake"
+
+[features]
+default = []
+tls-client = ["dep:tokio-rustls", "dep:rustls", "dep:rustls-native-certs"]
+
+[dependencies]
+thiserror = "1.0"
+tokio = { version = "1.38", features = ["rt", "time", "net", "io-util", "macros", "test-util" ] }
+tokio-rustls = { version = "0.25", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
+rustls-native-certs = { version = "0.7", optional = true }
+rustls-pemfile = { version = "2.2", optional = false }
+hmac = "0.12"
+sha2 = "0.10"
+rand = { version = "0.8", features = ["std"] }
+hex = "0.4"

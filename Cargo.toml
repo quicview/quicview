@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cli",
+    "crates/config",
+    "crates/proto",
+    "crates/client",
+    "crates/server",
+    "crates/transport",
+    "apps/leptos-web",
+]
+default-members = [
+    "crates/cli",
+    "crates/config",
+    "crates/proto",
+    "crates/client",
+    "crates/server",
+    "crates/transport",
+    "apps/leptos-web",
+]
+
+# Workspace-wide release profile (moved from vendored libs to avoid warnings)
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true

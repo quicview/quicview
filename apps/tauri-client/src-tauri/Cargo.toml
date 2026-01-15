@@ -1,0 +1,32 @@
+[package]
+name = "tauri-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "1.6", default-features = false, features = ["api-all", "system-tray"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+# QuicView client with HTTP UI and macOS features
+client = { path = "../../../crates/client", features = ["http-ui", "macos-input", "macos-capture", "clipboard"] }
+urlencoding = "2"
+
+[build-dependencies]
+# intentionally empty; build.rs is a no-op unless we reintroduce tauri-build for release builds
+
+[features]
+# default build disables the system tray to simplify CI
+default = []
+# opt-in feature to build the desktop app binary
+desktop = ["dep:tauri"]
+# enable with `--features tray` when you want the menu tray
+tray = ["desktop", "tauri/system-tray"]
+# enable full Tauri API surface to align with CI `--all-features` builds
+api-all = ["desktop", "tauri/api-all"]
+
+[[bin]]
+name = "tauri-client"
+path = "src/main.rs"
+required-features = ["desktop"]

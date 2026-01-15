@@ -1,0 +1,61 @@
+syntax = "proto3";
+package hbb;
+
+// Minimal QuicView control protocol (schema only)
+// This mirrors the JSON-framed control used over QUIC today,
+// providing a stable, versioned schema for future binary framing.
+
+message ControlHello {
+  string agent_id = 1;   // opaque client/agent identifier
+  string token = 2;      // bearer token for auth
+  string version = 3;    // protocol/app version (semantic string)
+}
+
+message ControlHelloOk {}
+
+message ControlHelloErr {
+  string reason = 1;     // e.g., "auth", "version"
+}
+
+message ControlPing { uint64 nonce = 1; }
+message ControlPong { uint64 nonce = 1; }
+
+enum ControlCmdType { CMD_START = 0; CMD_STOP = 1; }
+message ControlCmd { ControlCmdType cmd = 1; }
+message ControlAck {}
+
+// Server asks client to present a new token (e.g., rotation)
+message ControlReauthRequest {}
+message ControlReauth { string token = 1; }
+message ControlReauthOk {}
+message ControlReauthErr { string reason = 1; }
+
+// Graceful close with a reason that client can surface/log
+message ControlClose { string reason = 1; }
+
+// Generic error reporting for control plane
+message ControlError {
+  string code = 1;
+  string message = 2;
+}
+
+// Top-level envelope for framing
+message ControlEnvelope {
+  // Optional semantic protocol version for forwards/backwards compat gating
+  string protocol_version = 1;
+  oneof union {
+    ControlHello hello = 10;
+    ControlHelloOk hello_ok = 11;
+    ControlHelloErr hello_err = 12;
+    ControlPing ping = 13;
+    ControlPong pong = 14;
+    ControlCmd cmd = 15;
+    ControlAck ack = 16;
+    ControlReauthRequest reauth_request = 17;
+    ControlReauth reauth = 18;
+    ControlReauthOk reauth_ok = 19;
+    ControlReauthErr reauth_err = 20;
+    ControlClose close = 21;
+  ControlError error = 22;
+  }
+}

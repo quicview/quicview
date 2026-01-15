@@ -1,0 +1,42 @@
+[package]
+name = "transport"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[features]
+default = ["quic", "ctrl-proto"]
+quic = [
+	"quinn",
+	"rustls",
+	"tokio/rt-multi-thread",
+	"tokio/macros",
+	"tokio/time",
+	"sha2",
+	"hex",
+	"rustls-native-certs",
+	"rustls-pemfile",
+	"tokio-rustls",
+]
+# Enable protobuf framing for control channel using hbb_common's generated control.proto
+ctrl-proto = [ "hbb_common" ]
+
+[dependencies]
+anyhow = "1.0"
+tracing = "0.1"
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+quinn = { version = "0.11", optional = true, default-features = false, features = ["rustls-ring", "runtime-tokio"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
+bytes = "1.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_bytes = "0.11"
+rcgen = { version = "0.12", optional = false, default-features = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+rustls-native-certs = { version = "0.7", optional = true }
+rustls-pemfile = { version = "2", optional = true }
+hbb_common = { path = "../../libs/hbb_common", optional = true }
+
+ 
