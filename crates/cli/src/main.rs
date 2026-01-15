@@ -196,7 +196,8 @@ async fn main() -> Result<()> {
                 cfg.server.quic_bind.clone().unwrap_or_else(|| "0.0.0.0".to_string()),
                 cfg.server.effective_port()
             );
-            println!("server.started health={} quic={} (Ctrl+C to exit)", handle.addr, quic_addr);
+            let ctrl_port = cfg.server.ctrl_port.unwrap_or(4433);
+            println!("server.started health={} quic={} ctrl=0.0.0.0:{} (Ctrl+C to exit)", handle.addr, quic_addr, ctrl_port);
             // Wait for Ctrl+C or SIGTERM (Unix), then shutdown gracefully.
             #[cfg(unix)]
             {

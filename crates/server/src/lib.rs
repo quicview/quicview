@@ -204,12 +204,34 @@ pub async fn run(cfg: &QuicViewConfig) -> Result<ServerHandle> {
     let ready = Arc::new(ReadyState::new());
     let shutdown = Arc::new(Notify::new());
 
-    // We expect 2 subsystems: health + QUIC
-    ready.set_expected(2);
+    // We expect 3 subsystems: health + QUIC streaming + QUIC ctrl
+    ready.set_expected(3);
     ready.child_started(); // health server counts as started
 
     let handle = run_health_server(addr, ready.clone(), shutdown.clone()).await?;
     info!(addr = %handle.addr, "server started: health and readiness endpoints active");
+
+    // Start QUIC ctrl server on ctrl port (default 4433, or from config)
+    let ctrl_port = cfg.server.ctrl_port.unwrap_or(4433);
+    let ctrl_bind: SocketAddr = format!("0.0.0.0:{}", ctrl_port).parse()?;
+    let ctrl_token = cfg.server.auth_token.clone().unwrap_or_else(|| "dev-token".to_string());
+    
+    let shutdown_ctrl = shutdown.clone();
+    let ready_ctrl = ready.clone();
+    tokio::spawn(async move {
+        match transport::quic_ctrl::start_ctrl_server(ctrl_bind, ctrl_token).await {
+            Ok((addr, _join, _tx_cmd, _tx_sig)) => {
+                info!(%addr, "QUIC ctrl server listening");
+                ready_ctrl.child_started();
+                // Wait for shutdown signal
+                shutdown_ctrl.notified().await;
+                info!("QUIC ctrl server: shutdown signaled");
+            }
+            Err(e) => {
+                error!(error = %e, "failed to start QUIC ctrl server");
+            }
+        }
+    });
 
     // Start QUIC server on the main port (default 21116, or from config)
     let quic_host = cfg.server.quic_bind.clone().unwrap_or_else(|| "0.0.0.0".to_string());

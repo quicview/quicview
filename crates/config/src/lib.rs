@@ -145,6 +145,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub quic_bind: Option<String>,
     
+    /// QUIC ctrl server port (e.g., 4433). Defaults to 4433.
+    #[serde(default)]
+    pub ctrl_port: Option<u16>,
+    
     /// Client-side TLS CA bundle path.
     #[serde(default)]
     pub client_tls_ca_path: Option<String>,
@@ -182,6 +186,7 @@ impl Default for ServerConfig {
             health_bind: None,
             health_port: None,
             quic_bind: None,
+            ctrl_port: None,
             client_tls_ca_path: None,
             client_tls_sni: None,
         }
