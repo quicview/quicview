@@ -67,7 +67,7 @@ pub mod quic_ctrl {
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cert_chain.clone(), key)?;
-        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        server_crypto.alpn_protocols = vec![b"quicview/ctrl".to_vec()];
         // Wrap rustls config for quinn
         let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
         let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
@@ -152,7 +152,7 @@ pub mod quic_ctrl {
         let mut client_crypto = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
-        client_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        client_crypto.alpn_protocols = vec![b"quicview/ctrl".to_vec()];
         client_crypto
             .dangerous()
             .set_certificate_verifier(Arc::new(NoVerify));
@@ -326,7 +326,7 @@ pub mod quic_ctrl {
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cert_chain, key)?;
-        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        server_crypto.alpn_protocols = vec![b"quicview/ctrl".to_vec()];
         let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
         let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
         let endpoint = Endpoint::server(server_config, bind)?;
@@ -437,7 +437,7 @@ pub mod quic_ctrl {
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cert_chain, key)?;
-        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        server_crypto.alpn_protocols = vec![b"quicview/ctrl".to_vec()];
         let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
         let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
         let endpoint = Endpoint::server(server_config, bind)?;
@@ -722,7 +722,7 @@ pub mod quic_ctrl {
                 rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()
             }
         };
-        client_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        client_crypto.alpn_protocols = vec![b"quicview/ctrl".to_vec()];
         match mode {
             TlsMode::SystemRoots { .. } => {}
             TlsMode::PinSha256 { der_sha256_hex, .. } => {

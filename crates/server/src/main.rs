@@ -6,7 +6,7 @@ use tokio::{
 };
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "QuicView minimal server (DLNK/1)")]
+#[command(author, version, about = "QuicView minimal server (QUICVIEW/1)")]
 struct Args {
     /// Listen address for handshake server (e.g., 0.0.0.0:21116)
     #[arg(long, default_value = "0.0.0.0:21116")]
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let (h, p) = parse_host_port(&args.listen, 21116);
     let listener = TcpListener::bind(format!("{h}:{p}")).await?;
-    eprintln!("DLNK/1 listening on {h}:{p}");
+    eprintln!("QUICVIEW/1 listening on {h}:{p}");
 
     if let Some(health) = args.health.clone() {
         tokio::spawn(async move {

@@ -8,7 +8,7 @@ use tokio::{
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host = std::env::args().nth(1).unwrap_or("127.0.0.1:21116".into());
-    let key = std::env::var("DLNK_KEY").ok();
+    let key = std::env::var("QUICVIEW_KEY").ok();
     let (h, p) = parse_host_port(&host, 21116);
     let bind: SocketAddr = format!("{h}:{p}").parse()?;
     let listener = TcpListener::bind(bind).await?;

@@ -1,9 +1,9 @@
 # QuicView Minimal Server (original)
 
-Status: minimal, original TCP server that speaks the `DLNK/1` text handshake and exposes an optional health TCP port.
+Status: minimal, original TCP server that speaks the `QUICVIEW/1` text handshake and exposes an optional health TCP port.
 
 What this is:
-- A small async binary (`src/main.rs`) that listens on `--listen` and replies `DLNK/1 OK` to a `DLNK/1 HELLO` line.
+- A small async binary (`src/main.rs`) that listens on `--listen` and replies `QUICVIEW/1 OK` to a `QUICVIEW/1 HELLO` line.
 - Optional HMAC auth: pass `--key` and clients must include `auth=hmac(nonce)`.
 - Optional `--health` TCP listener that accepts and immediately closes (readiness check).
 

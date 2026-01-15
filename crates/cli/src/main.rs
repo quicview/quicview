@@ -17,7 +17,7 @@ struct Cli {
     #[arg(short, long, default_value = "quicview.yaml", global = true)]
     config: String,
 
-    /// Optional path to a file containing the HMAC key for client-handshake (overrides `DLNK_KEY`)
+    /// Optional path to a file containing the HMAC key for client-handshake (overrides `QUICVIEW_KEY`)
     #[arg(long, global = true)]
     key_from_file: Option<String>,
 
@@ -320,7 +320,7 @@ async fn main() -> Result<()> {
                 }
             } else {
                 // Check config auth_token or env
-                cfg.server.auth_token.clone().or_else(|| std::env::var("DLNK_KEY").ok())
+                cfg.server.auth_token.clone().or_else(|| std::env::var("QUICVIEW_KEY").ok())
             };
             let tls_enabled = cfg.server.effective_tls_enabled() && !cli.no_tls;
             let res = if tls_enabled {

@@ -47,7 +47,7 @@ Milestones are incremental and testable. Where feasible, include cross-platform 
 - Acceptance:
   - `cargo run -p cli --features server -- launch-server -c examples/QuicView.yaml` starts listeners.
   - `--health` endpoint responds OK; basic logs present.
-  - Clients can perform a minimal `DLNK/1` handshake against the listener.
+  - Clients can perform a minimal `QUICVIEW/1` handshake against the listener.
 
 ### M2 — Protocol interop hardening
 

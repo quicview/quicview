@@ -18,7 +18,7 @@ crates/
 ├── common/       # ⚠️ LEGACY — RustDesk P2P code (rendezvous, LAN, KCP, etc.)
 ├── config/       # YAML config schema (QuicViewConfig)
 ├── plugin/       # Plugin framework (unused)
-├── proto/        # TCP/TLS probe, DLNK/1 handshake, address parsing
+├── proto/        # TCP/TLS probe, QUICVIEW/1 handshake, address parsing
 ├── server/       # Minimal HTTP health server (stub)
 └── transport/    # ✅ QUIC control channel (quinn-based, JSON/protobuf framing)
 

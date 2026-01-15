@@ -118,8 +118,8 @@ pub async fn probe_tls(
     Err(ProtoError::InvalidSni("tls-client feature disabled".into()))
 }
 
-pub const HELLO_PFX: &str = "DLNK/1 HELLO"; // e.g. DLNK/1 HELLO nonce=<hex> [auth=<hex>]\n
-pub const OK: &[u8] = b"DLNK/1 OK\n";
+pub const HELLO_PFX: &str = "QUICVIEW/1 HELLO"; // e.g. QUICVIEW/1 HELLO nonce=<hex> [auth=<hex>]\n
+pub const OK: &[u8] = b"QUICVIEW/1 OK\n";
 
 /// Parse `host[:port]` including IPv6 forms like `[::1]:21116`.
 /// Returns (host, port) where host has no brackets. If no port, uses `default_port`.
@@ -224,8 +224,8 @@ pub fn hmac_nonce_hex(nonce_hex: &str, key: &[u8]) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
-/// Minimal custom handshake over plain TCP: send "DLNK/1 HELLO\n" and expect "DLNK/1 OK\n".
-/// Minimal custom handshake over plain TCP: send "DLNK/1 HELLO\n" and expect "DLNK/1 OK\n".
+/// Minimal custom handshake over plain TCP: send "QUICVIEW/1 HELLO\n" and expect "QUICVIEW/1 OK\n".
+/// Minimal custom handshake over plain TCP: send "QUICVIEW/1 HELLO\n" and expect "QUICVIEW/1 OK\n".
 ///
 /// # Errors
 /// Returns an error on connect, timeout, or protocol mismatch.

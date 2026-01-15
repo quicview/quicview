@@ -10,7 +10,7 @@ Status: experimental, original (no upstream reuse).
 Client -> Server:
 
 ```
-DLNK/1 HELLO nonce=<hex> [auth=<hex>]
+QUICVIEW/1 HELLO nonce=<hex> [auth=<hex>]
 ```
 
 - `nonce=<hex>`: hex-encoded 16 random bytes (generated per-connection).
@@ -19,7 +19,7 @@ DLNK/1 HELLO nonce=<hex> [auth=<hex>]
 Server -> Client (success):
 
 ```
-DLNK/1 OK
+QUICVIEW/1 OK
 ```
 
 Otherwise the server closes the connection without response.
@@ -46,16 +46,16 @@ Otherwise the server closes the connection without response.
 
 ## Example server (for local testing)
 
-A small mock is provided at `examples/handshake_server.rs`. It accepts the v1 hello line and replies `DLNK/1 OK` if:
-- No key is configured (`DLNK_KEY` unset), or
-- `DLNK_KEY` is set and the `auth` matches `hmac(nonce)`.
+A small mock is provided at `examples/handshake_server.rs`. It accepts the v1 hello line and replies `QUICVIEW/1 OK` if:
+- No key is configured (`QUICVIEW_KEY` unset), or
+- `QUICVIEW_KEY` is set and the `auth` matches `hmac(nonce)`.
 
 Run:
 
 ```bash
 cargo run --example handshake_server -- 127.0.0.1:21116
 # with key
-DLNK_KEY="secret" cargo run --example handshake_server -- 127.0.0.1:21116
+QUICVIEW_KEY="secret" cargo run --example handshake_server -- 127.0.0.1:21116
 ```
 
 Client (CLI):
