@@ -43,7 +43,6 @@ use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-#[cfg(feature = "quic-data")]
 use transport::quic_data::{
     ClipboardMessage, DataClient, DataClientConfig,
     InputEvent, MouseButton, ScreenEncoding, ScreenFrame,
@@ -170,7 +169,6 @@ pub enum ScreenEncodingType {
     RawBgra,
 }
 
-#[cfg(feature = "quic-data")]
 impl From<ScreenEncoding> for ScreenEncodingType {
     fn from(e: ScreenEncoding) -> Self {
         match e {
@@ -181,7 +179,6 @@ impl From<ScreenEncoding> for ScreenEncodingType {
     }
 }
 
-#[cfg(feature = "quic-data")]
 impl From<ScreenFrame> for ScreenFrameEvent {
     fn from(f: ScreenFrame) -> Self {
         Self {
@@ -196,7 +193,6 @@ impl From<ScreenFrame> for ScreenFrameEvent {
 }
 
 /// Handle to a running QUIC client connection
-#[cfg(feature = "quic-data")]
 pub struct QuicViewClient {
     #[allow(dead_code)]
     config: QuicClientConfig,
@@ -207,7 +203,6 @@ pub struct QuicViewClient {
     tasks: Vec<JoinHandle<()>>,
 }
 
-#[cfg(feature = "quic-data")]
 #[derive(Default)]
 struct ClientState {
     connected: bool,
@@ -217,7 +212,6 @@ struct ClientState {
     input_events_sent: u64,
 }
 
-#[cfg(feature = "quic-data")]
 impl QuicViewClient {
     /// Connect to a QuicView server
     pub async fn connect(
@@ -397,7 +391,6 @@ pub enum MouseButtonType {
     Forward,
 }
 
-#[cfg(feature = "quic-data")]
 impl From<MouseButtonType> for MouseButton {
     fn from(b: MouseButtonType) -> Self {
         match b {
@@ -420,7 +413,6 @@ pub struct ClientStats {
 }
 
 /// Convert client TLS mode to transport TLS mode
-#[cfg(feature = "quic-data")]
 fn to_transport_tls_mode(mode: &ClientTlsMode) -> TransportTlsMode {
     match mode {
         ClientTlsMode::System => TransportTlsMode::System,
@@ -432,7 +424,6 @@ fn to_transport_tls_mode(mode: &ClientTlsMode) -> TransportTlsMode {
 }
 
 /// Main connection loop with reconnection support
-#[cfg(feature = "quic-data")]
 async fn run_connection_loop(
     config: QuicClientConfig,
     state: Arc<RwLock<ClientState>>,
@@ -524,7 +515,6 @@ async fn run_connection_loop(
 }
 
 /// Run a connected session
-#[cfg(feature = "quic-data")]
 async fn run_session(
     client: &DataClient,
     config: &QuicClientConfig,
@@ -674,7 +664,7 @@ fn calculate_backoff(attempt: u32, base_ms: u64, max_ms: u64) -> u64 {
 // Tests
 // ============================================================================
 
-#[cfg(all(test, feature = "quic-data"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use transport::quic_data::{start_data_server, DataServerConfig, DataServerEvent};

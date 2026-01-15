@@ -27,11 +27,9 @@ pub use display_detection::{
 };
 
 // QUIC server module
-#[cfg(feature = "quic-server")]
 pub mod quic_server;
 
-// Re-export QUIC server types when feature is enabled
-#[cfg(feature = "quic-server")]
+// Re-export QUIC server types
 pub use quic_server::{
     QuicServerConfig, QuicServerEvent, QuicServerHandle,
     start_quic_server, ScreenCapturer, InputInjector,

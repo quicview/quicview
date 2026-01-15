@@ -3,15 +3,11 @@ name = "client"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "QuicView client core (headless agent + UI-agnostic API), plus legacy launcher stub"
+description = "QuicView client core with QUIC transport, headless agent, and UI-agnostic API"
 
 [features]
 default = []
-# Web-first UI integration (Leptos) to be added in a separate crate; kept as a placeholder feature.
-web = []
-# Native wrapper (Tauri) to be added in a separate crate; kept as a placeholder feature.
-native = []
-# Optional local HTTP control surface for web UI (not enabled by default)
+# Optional local HTTP control surface for web UI
 http-ui = [
 	"dep:hyper",
 	"dep:http-body-util",
@@ -19,13 +15,9 @@ http-ui = [
 	"dep:bytes",
 	"dep:serde",
 	"dep:serde_json",
-	"dep:anyhow",
 	"dep:image",
 	"dep:tokio-stream",
 ]
-quic-ctrl = ["dep:transport"]
-# QUIC data streams for direct server connection (screen, input, clipboard)
-quic-data = ["dep:transport", "transport/quic", "dep:anyhow"]
 macos-capture = [
 	"dep:screenshots",
 ]
@@ -35,27 +27,25 @@ macos-input = [
 clipboard = [
 	"dep:arboard",
 ]
-# Deprecated: Flutter integration is removed.
-# flutter = []
 
 [dependencies]
 thiserror = "1.0"
+anyhow = "1.0"
 tokio = { version = "1.38", features = ["rt", "macros", "sync", "time", "fs"] }
 config = { path = "../config" }
 proto = { path = "../proto" }
 bridge = { path = "../bridge" }
+transport = { path = "../transport" }
 hyper = { version = "1", features = ["server", "http1"], optional = true }
 http-body-util = { version = "0.1", optional = true }
 hyper-util = { version = "0.1", features = ["tokio"], optional = true }
 bytes = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
-anyhow = { version = "1.0", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
 tokio-stream = { version = "0.1", optional = true }
 screenshots = { version = "0.8", optional = true }
 core-graphics = { version = "0.23", optional = true }
 arboard = { version = "3", optional = true }
-transport = { path = "../transport", optional = true }
 
 [dev-dependencies]

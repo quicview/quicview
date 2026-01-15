@@ -1,56 +1,42 @@
 //! Transport crate
 //!
 //! Provides transport layer implementations for QuicView:
-//! - **QUIC control channel**: Signaling, auth, keepalive (existing)
+//! - **QUIC control channel**: Signaling, auth, keepalive
 //! - **QUIC data streams**: Screen, input, clipboard over multiplexed QUIC streams
-//! - **TCP+TLS fallback**: For UDP-blocked networks
+//! - **TCP+TLS fallback**: For UDP-blocked networks (optional, feature-gated)
 
 use anyhow::{Context, Result};
 use std::net::SocketAddr;
 
 /// QUIC data streams for screen, input, clipboard.
-#[cfg(feature = "quic")]
 pub mod quic_data;
 
 /// TCP+TLS fallback transport for UDP-blocked networks.
-#[cfg(feature = "quic")]
+#[cfg(feature = "tcp-fallback")]
 pub mod tcp_data;
 
-/// QUIC control channel API surface (currently a stub scaffold).
+/// QUIC control channel API surface.
 pub mod quic_ctrl {
     use super::*;
-    #[cfg(feature = "quic")]
     use quinn::{Endpoint, RecvStream, SendStream};
-    #[cfg(feature = "quic")]
     use quinn::crypto::rustls as quinn_rustls;
-    #[cfg(feature = "quic")]
     use quinn::{ClientConfig as QuinnClientConfig, ServerConfig as QuinnServerConfig};
-    #[cfg(feature = "quic")]
     use rustls::{
         client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
         pki_types::{CertificateDer, ServerName, UnixTime},
         DigitallySignedStruct, SignatureScheme,
     };
-    #[cfg(feature = "quic")]
     use std::sync::Arc;
-    #[cfg(feature = "quic")]
     use serde::{Deserialize, Serialize};
-    #[cfg(all(feature = "quic", feature = "ctrl-proto"))]
     use hbb_common::protobuf::Message;
     
-    #[cfg(feature = "quic")]
     use tokio::sync::{mpsc, broadcast, RwLock};
-    #[cfg(feature = "quic")]
     use sha2::{Digest, Sha256};
-    #[cfg(feature = "quic")]
     use hex::ToHex;
-    #[cfg(feature = "quic")]
     use rustls_native_certs as native_certs;
-    #[cfg(feature = "quic")]
     use rustls_pemfile as pemfile;
 
     /// Client-side QUIC control configuration.
-    #[cfg(feature = "quic")]
     #[derive(Debug, Clone, Copy)]
     pub struct CtrlClientConfig {
         /// Heartbeat ping interval in seconds.
@@ -61,7 +47,6 @@ pub mod quic_ctrl {
         pub backoff_max_ms: u64,
     }
 
-    #[cfg(feature = "quic")]
     impl Default for CtrlClientConfig {
         fn default() -> Self {
             Self { ping_interval_secs: 10, backoff_base_ms: 500, backoff_max_ms: 32_000 }
@@ -70,142 +55,127 @@ pub mod quic_ctrl {
 
     /// Start a local QUIC control listener (stub).
     pub async fn start_echo_server() -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
-        #[cfg(not(feature = "quic"))]
-        {
-            anyhow::bail!("quic feature disabled");
-        }
-        #[cfg(feature = "quic")]
-        {
-            // Generate a self-signed cert for localhost for dev/testing
-            let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
-            let cert_der = cert.serialize_der()?;
-            let key_der = cert.serialize_private_key_der();
+        // Generate a self-signed cert for localhost for dev/testing
+        let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
+        let cert_der = cert.serialize_der()?;
+        let key_der = cert.serialize_private_key_der();
 
-            let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
-                .map_err(|_| anyhow::anyhow!("invalid key"))?;
-            let cert_chain = vec![CertificateDer::from(cert_der.clone())];
+        let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
+            .map_err(|_| anyhow::anyhow!("invalid key"))?;
+        let cert_chain = vec![CertificateDer::from(cert_der.clone())];
 
-            let mut server_crypto = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(cert_chain.clone(), key)?;
-            server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
-            // Wrap rustls config for quinn
-            let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
-            let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain.clone(), key)?;
+        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        // Wrap rustls config for quinn
+        let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
+        let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
 
-            let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-            let endpoint = Endpoint::server(server_config, bind_addr)?;
-            let local_addr = endpoint.local_addr()?;
+        let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let endpoint = Endpoint::server(server_config, bind_addr)?;
+        let local_addr = endpoint.local_addr()?;
 
-            let join = tokio::spawn(async move {
-                loop {
-                    match endpoint.accept().await {
-                        Some(conn) => {
-                            tokio::spawn(async move {
-                                if let Ok(connection) = conn.await {
-                                    loop {
-                                        let bi = match connection.accept_bi().await {
-                                            Ok(streams) => streams,
-                                            Err(_) => break,
-                                        };
-                                        let (mut send, mut recv): (SendStream, RecvStream) = bi;
-                                        // Echo protocol: read a frame, echo back
-                                        let mut buf = Vec::new();
-                                        if let Ok(n) = recv.read_to_end(64 * 1024).await {
-                                            buf.extend_from_slice(&n);
-                                        }
-                                        let _ = send.write_all(&buf).await;
-                                        let _ = send.finish();
+        let join = tokio::spawn(async move {
+            loop {
+                match endpoint.accept().await {
+                    Some(conn) => {
+                        tokio::spawn(async move {
+                            if let Ok(connection) = conn.await {
+                                loop {
+                                    let bi = match connection.accept_bi().await {
+                                        Ok(streams) => streams,
+                                        Err(_) => break,
+                                    };
+                                    let (mut send, mut recv): (SendStream, RecvStream) = bi;
+                                    // Echo protocol: read a frame, echo back
+                                    let mut buf = Vec::new();
+                                    if let Ok(n) = recv.read_to_end(64 * 1024).await {
+                                        buf.extend_from_slice(&n);
                                     }
+                                    let _ = send.write_all(&buf).await;
+                                    let _ = send.finish();
                                 }
-                            });
-                        }
-                        None => break,
+                            }
+                        });
                     }
+                    None => break,
                 }
-            });
-            Ok((local_addr, join))
-        }
+            }
+        });
+        Ok((local_addr, join))
     }
 
     /// Perform a heartbeat (stub).
     pub async fn heartbeat(addr: SocketAddr) -> Result<()> {
-        #[cfg(not(feature = "quic"))]
-        {
-            anyhow::bail!("quic feature disabled");
-        }
-        #[cfg(feature = "quic")]
-        {
-            // Insecure verifier that trusts the self-signed cert for dev (do not ship in production)
-            #[derive(Debug)]
-            struct NoVerify;
-            impl ServerCertVerifier for NoVerify {
-                fn verify_server_cert(
-                    &self,
-                    _end_entity: &CertificateDer<'_>,
-                    _intermediates: &[CertificateDer<'_>],
-                    _server_name: &ServerName<'_>,
-                    _ocsp: &[u8],
-                    _now: UnixTime,
-                ) -> std::result::Result<ServerCertVerified, rustls::Error> {
-                    Ok(ServerCertVerified::assertion())
-                }
-                fn verify_tls12_signature(
-                    &self,
-                    _message: &[u8],
-                    _cert: &CertificateDer<'_>,
-                    _dss: &DigitallySignedStruct,
-                ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-                    Ok(HandshakeSignatureValid::assertion())
-                }
-                fn verify_tls13_signature(
-                    &self,
-                    _message: &[u8],
-                    _cert: &CertificateDer<'_>,
-                    _dss: &DigitallySignedStruct,
-                ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-                    Ok(HandshakeSignatureValid::assertion())
-                }
-                fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-                    vec![
-                        SignatureScheme::ECDSA_NISTP256_SHA256,
-                        SignatureScheme::ED25519,
-                        SignatureScheme::RSA_PSS_SHA256,
-                    ]
-                }
+        // Insecure verifier that trusts the self-signed cert for dev (do not ship in production)
+        #[derive(Debug)]
+        struct NoVerify;
+        impl ServerCertVerifier for NoVerify {
+            fn verify_server_cert(
+                &self,
+                _end_entity: &CertificateDer<'_>,
+                _intermediates: &[CertificateDer<'_>],
+                _server_name: &ServerName<'_>,
+                _ocsp: &[u8],
+                _now: UnixTime,
+            ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+                Ok(ServerCertVerified::assertion())
             }
-
-            let roots = rustls::RootCertStore::empty();
-            // Build client config and install a dangerous verifier for local dev
-            let mut client_crypto = rustls::ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            client_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
-            client_crypto
-                .dangerous()
-                .set_certificate_verifier(Arc::new(NoVerify));
-            let client_crypto = quinn_rustls::QuicClientConfig::try_from(client_crypto)?;
-            let client_config = QuinnClientConfig::new(Arc::new(client_crypto));
-
-            let mut endpoint = Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-            endpoint.set_default_client_config(client_config);
-            let conn = endpoint
-                .connect(addr, "localhost")
-                .context("connect")?
-                .await
-                .context("handshake")?;
-            let (mut send, mut recv) = conn.open_bi().await?;
-            let payload = b"ping";
-            send.write_all(payload).await?;
-            send.finish()?;
-            let echoed = recv.read_to_end(64 * 1024).await?;
-            anyhow::ensure!(&echoed == payload, "echo mismatch");
-            Ok(())
+            fn verify_tls12_signature(
+                &self,
+                _message: &[u8],
+                _cert: &CertificateDer<'_>,
+                _dss: &DigitallySignedStruct,
+            ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn verify_tls13_signature(
+                &self,
+                _message: &[u8],
+                _cert: &CertificateDer<'_>,
+                _dss: &DigitallySignedStruct,
+            ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                vec![
+                    SignatureScheme::ECDSA_NISTP256_SHA256,
+                    SignatureScheme::ED25519,
+                    SignatureScheme::RSA_PSS_SHA256,
+                ]
+            }
         }
+
+        let roots = rustls::RootCertStore::empty();
+        // Build client config and install a dangerous verifier for local dev
+        let mut client_crypto = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        client_crypto
+            .dangerous()
+            .set_certificate_verifier(Arc::new(NoVerify));
+        let client_crypto = quinn_rustls::QuicClientConfig::try_from(client_crypto)?;
+        let client_config = QuinnClientConfig::new(Arc::new(client_crypto));
+
+        let mut endpoint = Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+        endpoint.set_default_client_config(client_config);
+        let conn = endpoint
+            .connect(addr, "localhost")
+            .context("connect")?
+            .await
+            .context("handshake")?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        let payload = b"ping";
+        send.write_all(payload).await?;
+        send.finish()?;
+        let echoed = recv.read_to_end(64 * 1024).await?;
+        anyhow::ensure!(&echoed == payload, "echo mismatch");
+        Ok(())
     }
 
     // ====== Minimal JSON-framed control protocol ======
-    #[cfg(feature = "quic")]
     #[derive(Debug, Serialize, Deserialize, Clone)]
     #[serde(tag = "type", content = "data")]
     pub enum CtrlMessage {
@@ -227,58 +197,34 @@ pub mod quic_ctrl {
         Close { reason: String },
     }
 
-    #[cfg(feature = "quic")]
     #[derive(Debug, Serialize, Deserialize, Clone)]
     pub enum Cmd { Start, Stop }
 
-    #[cfg(feature = "quic")]
     #[derive(Debug)]
     pub enum CtrlEvent { Liveness, Command(Cmd), Connected, Disconnected(String), AuthRenewed, Error(String) }
 
-    #[cfg(feature = "quic")]
     async fn write_frame(send: &mut SendStream, msg: &CtrlMessage) -> Result<()> {
-        #[cfg(feature = "ctrl-proto")]
-        {
-            // Encode via protobuf envelope for ctrl-proto feature
-            let env = to_proto_envelope(msg.clone());
-            let mut payload = Vec::new();
-            env.write_to_vec(&mut payload)?;
-            let len = (payload.len() as u32).to_be_bytes();
-            send.write_all(&len).await?;
-            send.write_all(&payload).await?;
-            return Ok(());
-        }
-        #[cfg(not(feature = "ctrl-proto"))]
-        {
-            let payload = serde_json::to_vec(msg)?;
-            let len = (payload.len() as u32).to_be_bytes();
-            send.write_all(&len).await?;
-            send.write_all(&payload).await?;
-            Ok(())
-        }
+        // Encode via protobuf envelope
+        let env = to_proto_envelope(msg.clone());
+        let mut payload = Vec::new();
+        env.write_to_vec(&mut payload)?;
+        let len = (payload.len() as u32).to_be_bytes();
+        send.write_all(&len).await?;
+        send.write_all(&payload).await?;
+        Ok(())
     }
 
-    #[cfg(feature = "quic")]
     async fn read_frame(recv: &mut RecvStream) -> Result<CtrlMessage> {
         let mut len_buf = [0u8; 4];
         recv.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
         let mut buf = vec![0u8; len];
         recv.read_exact(&mut buf).await?;
-        #[cfg(feature = "ctrl-proto")]
-        {
-            let env = hbb_common::control_proto::ControlEnvelope::parse_from_bytes(&buf)?;
-            return from_proto_envelope(env);
-        }
-        #[cfg(not(feature = "ctrl-proto"))]
-        {
-            let msg: CtrlMessage = serde_json::from_slice(&buf)?;
-            Ok(msg)
-        }
+        let env = hbb_common::control_proto::ControlEnvelope::parse_from_bytes(&buf)?;
+        from_proto_envelope(env)
     }
 
-    // ===== Protobuf envelope conversions (feature-gated) =====
-    #[cfg(all(feature = "quic", feature = "ctrl-proto"))]
+    // ===== Protobuf envelope conversions =====
     fn to_proto_envelope(msg: CtrlMessage) -> hbb_common::control_proto::ControlEnvelope {
         use hbb_common::control_proto as pb;
         let mut env = pb::ControlEnvelope::new();
@@ -338,7 +284,6 @@ pub mod quic_ctrl {
         env
     }
 
-    #[cfg(all(feature = "quic", feature = "ctrl-proto"))]
     fn from_proto_envelope(env: hbb_common::control_proto::ControlEnvelope) -> Result<CtrlMessage> {
         use hbb_common::control_proto as pb;
         use pb::control_envelope::Union::*;
@@ -367,247 +312,231 @@ pub mod quic_ctrl {
     }
 
     /// Start a control server that validates Hello token and can send commands via returned channel.
-    #[cfg(feature = "quic")]
     #[derive(Debug, Clone)]
     pub enum ServerSignal { ReauthRequest, UpdateToken(String), Close(String), Error { code: String, message: String } }
 
     pub async fn start_ctrl_server(bind: SocketAddr, expected_token: String) -> Result<(SocketAddr, tokio::task::JoinHandle<()>, broadcast::Sender<Cmd>, broadcast::Sender<ServerSignal>)> {
-        #[cfg(not(feature = "quic"))]
-        {
-            anyhow::bail!("quic feature disabled");
-        }
-        #[cfg(feature = "quic")]
-        {
-            // Self-signed localhost cert
-            let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
-            let cert_der = cert.serialize_der()?;
-            let key_der = cert.serialize_private_key_der();
-            let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
-                .map_err(|_| anyhow::anyhow!("invalid key"))?;
-            let cert_chain = vec![CertificateDer::from(cert_der.clone())];
-            let mut server_crypto = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(cert_chain, key)?;
-            server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
-            let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
-            let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
-            let endpoint = Endpoint::server(server_config, bind)?;
-            let local_addr = endpoint.local_addr()?;
-            // Commands injected by tests or external control
-            let (tx_cmd, _) = broadcast::channel::<Cmd>(8);
-            // Signals to inject server-initiated actions (e.g., reauth request)
-            let (tx_sig, _) = broadcast::channel::<ServerSignal>(8);
-            // Expected token can change after reauth
-            let expected_token = Arc::new(RwLock::new(expected_token));
-            let tx_cmd_for_task = tx_cmd.clone();
-            let tx_sig_for_task = tx_sig.clone();
-            let join = tokio::spawn(async move {
-                while let Some(incoming) = endpoint.accept().await {
-                    // Handle each connection
-                    let expected_token = expected_token.clone();
-                    let mut rx_cmd = tx_cmd_for_task.subscribe();
-                    let mut rx_sig = tx_sig_for_task.subscribe();
-                    tokio::spawn(async move {
-                        let conn = match incoming.await { Ok(c) => c, Err(_) => return };
-                        // Accept a BI stream
-                        let (mut send, mut recv) = match conn.accept_bi().await { Ok(s) => s, Err(_) => return };
-                        // Handshake
-                        let hello = match read_frame(&mut recv).await { Ok(m) => m, Err(_) => return };
-                        match hello {
-                            CtrlMessage::Hello { token, .. } if token == *expected_token.read().await => {
-                                // Auth ok
-                                if write_frame(&mut send, &CtrlMessage::HelloOk).await.is_err() { return; }
-                            }
-                            _ => {
-                                let _ = write_frame(&mut send, &CtrlMessage::HelloErr("auth".into())).await;
-                                return;
-                            }
+        // Self-signed localhost cert
+        let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
+        let cert_der = cert.serialize_der()?;
+        let key_der = cert.serialize_private_key_der();
+        let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
+            .map_err(|_| anyhow::anyhow!("invalid key"))?;
+        let cert_chain = vec![CertificateDer::from(cert_der.clone())];
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key)?;
+        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
+        let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
+        let endpoint = Endpoint::server(server_config, bind)?;
+        let local_addr = endpoint.local_addr()?;
+        // Commands injected by tests or external control
+        let (tx_cmd, _) = broadcast::channel::<Cmd>(8);
+        // Signals to inject server-initiated actions (e.g., reauth request)
+        let (tx_sig, _) = broadcast::channel::<ServerSignal>(8);
+        // Expected token can change after reauth
+        let expected_token = Arc::new(RwLock::new(expected_token));
+        let tx_cmd_for_task = tx_cmd.clone();
+        let tx_sig_for_task = tx_sig.clone();
+        let join = tokio::spawn(async move {
+            while let Some(incoming) = endpoint.accept().await {
+                // Handle each connection
+                let expected_token = expected_token.clone();
+                let mut rx_cmd = tx_cmd_for_task.subscribe();
+                let mut rx_sig = tx_sig_for_task.subscribe();
+                tokio::spawn(async move {
+                    let conn = match incoming.await { Ok(c) => c, Err(_) => return };
+                    // Accept a BI stream
+                    let (mut send, mut recv) = match conn.accept_bi().await { Ok(s) => s, Err(_) => return };
+                    // Handshake
+                    let hello = match read_frame(&mut recv).await { Ok(m) => m, Err(_) => return };
+                    match hello {
+                        CtrlMessage::Hello { token, .. } if token == *expected_token.read().await => {
+                            // Auth ok
+                            if write_frame(&mut send, &CtrlMessage::HelloOk).await.is_err() { return; }
                         }
+                        _ => {
+                            let _ = write_frame(&mut send, &CtrlMessage::HelloErr("auth".into())).await;
+                            return;
+                        }
+                    }
 
-                        // Main loop: respond to Ping, forward queued commands
-                        let mut ping_nonce: u64 = 0;
-                        loop {
-                            tokio::select! {
-                                incoming = read_frame(&mut recv) => {
-                                    match incoming {
-                                        Ok(CtrlMessage::Ping(n)) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Pong(n)).await;
-                                        }
-                                        Ok(CtrlMessage::Reauth { token }) => {
-                                            // Update expected token and ack
-                                            *expected_token.write().await = token;
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthOk).await;
-                                        }
-                                        Ok(CtrlMessage::Close { .. }) => {
-                                            // Client requested close; end loop
-                                            break;
-                                        }
-                                        Ok(_) => {}
-                                        Err(_) => break,
+                    // Main loop: respond to Ping, forward queued commands
+                    let mut ping_nonce: u64 = 0;
+                    loop {
+                        tokio::select! {
+                            incoming = read_frame(&mut recv) => {
+                                match incoming {
+                                    Ok(CtrlMessage::Ping(n)) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Pong(n)).await;
                                     }
-                                }
-                                maybe_cmd = rx_cmd.recv() => {
-                                    match maybe_cmd {
-                                        Ok(cmd) => {
-                                            if write_frame(&mut send, &CtrlMessage::Cmd(cmd)).await.is_err() { break; }
-                                        }
-                                        Err(_) => { break; }
+                                    Ok(CtrlMessage::Reauth { token }) => {
+                                        // Update expected token and ack
+                                        *expected_token.write().await = token;
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthOk).await;
                                     }
-                                }
-                                maybe_sig = rx_sig.recv() => {
-                                    match maybe_sig {
-                                        Ok(ServerSignal::ReauthRequest) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
-                                        }
-                                        Ok(ServerSignal::UpdateToken(new_tok)) => {
-                                            *expected_token.write().await = new_tok;
-                                            // Optionally notify client to reauth with the new token
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
-                                        }
-                                        Ok(ServerSignal::Close(reason)) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Close { reason }).await;
-                                            break;
-                                        }
-                                        Ok(ServerSignal::Error { code, message }) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Error { code, message }).await;
-                                        }
-                                        Err(_) => { break; }
+                                    Ok(CtrlMessage::Close { .. }) => {
+                                        // Client requested close; end loop
+                                        break;
                                     }
-                                }
-                                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                                    // Idle keepalive ping; ignore errors
-                                    ping_nonce = ping_nonce.wrapping_add(1);
-                                    if write_frame(&mut send, &CtrlMessage::Ping(ping_nonce)).await.is_err() { break; }
+                                    Ok(_) => {}
+                                    Err(_) => break,
                                 }
                             }
+                            maybe_cmd = rx_cmd.recv() => {
+                                match maybe_cmd {
+                                    Ok(cmd) => {
+                                        if write_frame(&mut send, &CtrlMessage::Cmd(cmd)).await.is_err() { break; }
+                                    }
+                                    Err(_) => { break; }
+                                }
+                            }
+                            maybe_sig = rx_sig.recv() => {
+                                match maybe_sig {
+                                    Ok(ServerSignal::ReauthRequest) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
+                                    }
+                                    Ok(ServerSignal::UpdateToken(new_tok)) => {
+                                        *expected_token.write().await = new_tok;
+                                        // Optionally notify client to reauth with the new token
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
+                                    }
+                                    Ok(ServerSignal::Close(reason)) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Close { reason }).await;
+                                        break;
+                                    }
+                                    Ok(ServerSignal::Error { code, message }) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Error { code, message }).await;
+                                    }
+                                    Err(_) => { break; }
+                                }
+                            }
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                                // Idle keepalive ping; ignore errors
+                                ping_nonce = ping_nonce.wrapping_add(1);
+                                if write_frame(&mut send, &CtrlMessage::Ping(ping_nonce)).await.is_err() { break; }
+                            }
                         }
-                    });
-                }
-            });
-            Ok((local_addr, join, tx_cmd, tx_sig))
-        }
+                    }
+                });
+            }
+        });
+        Ok((local_addr, join, tx_cmd, tx_sig))
     }
 
     /// Start a control server and also return its leaf certificate DER (for pin/TOFU tests).
     pub async fn start_ctrl_server_with_cert(bind: SocketAddr, expected_token: String) -> Result<(SocketAddr, tokio::task::JoinHandle<()>, broadcast::Sender<Cmd>, broadcast::Sender<ServerSignal>, Vec<u8>)> {
-        #[cfg(not(feature = "quic"))]
-        {
-            anyhow::bail!("quic feature disabled");
-        }
-        #[cfg(feature = "quic")]
-        {
-            // Self-signed localhost cert
-            let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
-            let cert_der = cert.serialize_der()?;
-            let key_der = cert.serialize_private_key_der();
-            let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
-                .map_err(|_| anyhow::anyhow!("invalid key"))?;
-            let cert_chain = vec![CertificateDer::from(cert_der.clone())];
-            let mut server_crypto = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(cert_chain, key)?;
-            server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
-            let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
-            let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
-            let endpoint = Endpoint::server(server_config, bind)?;
-            let local_addr = endpoint.local_addr()?;
-            // Commands injected by tests or external control
-            let (tx_cmd, _) = broadcast::channel::<Cmd>(8);
-            // Signals to inject server-initiated actions (e.g., reauth request)
-            let (tx_sig, _) = broadcast::channel::<ServerSignal>(8);
-            // Expected token can change after reauth
-            let expected_token = Arc::new(RwLock::new(expected_token));
-            let tx_cmd_for_task = tx_cmd.clone();
-            let tx_sig_for_task = tx_sig.clone();
-            let join = tokio::spawn(async move {
-                while let Some(incoming) = endpoint.accept().await {
-                    // Handle each connection
-                    let expected_token = expected_token.clone();
-                    let mut rx_cmd = tx_cmd_for_task.subscribe();
-                    let mut rx_sig = tx_sig_for_task.subscribe();
-                    tokio::spawn(async move {
-                        let conn = match incoming.await { Ok(c) => c, Err(_) => return };
-                        // Accept a BI stream
-                        let (mut send, mut recv) = match conn.accept_bi().await { Ok(s) => s, Err(_) => return };
-                        // Handshake
-                        let hello = match read_frame(&mut recv).await { Ok(m) => m, Err(_) => return };
-                        match hello {
-                            CtrlMessage::Hello { token, .. } if token == *expected_token.read().await => {
-                                // Auth ok
-                                if write_frame(&mut send, &CtrlMessage::HelloOk).await.is_err() { return; }
-                            }
-                            _ => {
-                                let _ = write_frame(&mut send, &CtrlMessage::HelloErr("auth".into())).await;
-                                return;
-                            }
+        // Self-signed localhost cert
+        let cert = rcgen::generate_simple_self_signed(["localhost".to_string()])?;
+        let cert_der = cert.serialize_der()?;
+        let key_der = cert.serialize_private_key_der();
+        let key = rustls::pki_types::PrivateKeyDer::try_from(key_der.clone())
+            .map_err(|_| anyhow::anyhow!("invalid key"))?;
+        let cert_chain = vec![CertificateDer::from(cert_der.clone())];
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key)?;
+        server_crypto.alpn_protocols = vec![b"dlnk/ctrl".to_vec()];
+        let server_crypto = quinn_rustls::QuicServerConfig::try_from(server_crypto)?;
+        let server_config = QuinnServerConfig::with_crypto(Arc::new(server_crypto));
+        let endpoint = Endpoint::server(server_config, bind)?;
+        let local_addr = endpoint.local_addr()?;
+        // Commands injected by tests or external control
+        let (tx_cmd, _) = broadcast::channel::<Cmd>(8);
+        // Signals to inject server-initiated actions (e.g., reauth request)
+        let (tx_sig, _) = broadcast::channel::<ServerSignal>(8);
+        // Expected token can change after reauth
+        let expected_token = Arc::new(RwLock::new(expected_token));
+        let tx_cmd_for_task = tx_cmd.clone();
+        let tx_sig_for_task = tx_sig.clone();
+        let join = tokio::spawn(async move {
+            while let Some(incoming) = endpoint.accept().await {
+                // Handle each connection
+                let expected_token = expected_token.clone();
+                let mut rx_cmd = tx_cmd_for_task.subscribe();
+                let mut rx_sig = tx_sig_for_task.subscribe();
+                tokio::spawn(async move {
+                    let conn = match incoming.await { Ok(c) => c, Err(_) => return };
+                    // Accept a BI stream
+                    let (mut send, mut recv) = match conn.accept_bi().await { Ok(s) => s, Err(_) => return };
+                    // Handshake
+                    let hello = match read_frame(&mut recv).await { Ok(m) => m, Err(_) => return };
+                    match hello {
+                        CtrlMessage::Hello { token, .. } if token == *expected_token.read().await => {
+                            // Auth ok
+                            if write_frame(&mut send, &CtrlMessage::HelloOk).await.is_err() { return; }
                         }
+                        _ => {
+                            let _ = write_frame(&mut send, &CtrlMessage::HelloErr("auth".into())).await;
+                            return;
+                        }
+                    }
 
-                        // Main loop: respond to Ping, forward queued commands
-                        let mut ping_nonce: u64 = 0;
-                        loop {
-                            tokio::select! {
-                                incoming = read_frame(&mut recv) => {
-                                    match incoming {
-                                        Ok(CtrlMessage::Ping(n)) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Pong(n)).await;
-                                        }
-                                        Ok(CtrlMessage::Reauth { token }) => {
-                                            // Update expected token and ack
-                                            *expected_token.write().await = token;
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthOk).await;
-                                        }
-                                        Ok(CtrlMessage::Close { .. }) => { break; }
-                                        Ok(_) => {}
-                                        Err(_) => break,
+                    // Main loop: respond to Ping, forward queued commands
+                    let mut ping_nonce: u64 = 0;
+                    loop {
+                        tokio::select! {
+                            incoming = read_frame(&mut recv) => {
+                                match incoming {
+                                    Ok(CtrlMessage::Ping(n)) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Pong(n)).await;
                                     }
-                                }
-                                maybe_cmd = rx_cmd.recv() => {
-                                    match maybe_cmd {
-                                        Ok(cmd) => {
-                                            if write_frame(&mut send, &CtrlMessage::Cmd(cmd)).await.is_err() { break; }
-                                        }
-                                        Err(_) => { break; }
+                                    Ok(CtrlMessage::Reauth { token }) => {
+                                        // Update expected token and ack
+                                        *expected_token.write().await = token;
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthOk).await;
                                     }
-                                }
-                                maybe_sig = rx_sig.recv() => {
-                                    match maybe_sig {
-                                        Ok(ServerSignal::ReauthRequest) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
-                                        }
-                                        Ok(ServerSignal::UpdateToken(new_tok)) => {
-                                            *expected_token.write().await = new_tok;
-                                            // Optionally notify client to reauth with the new token
-                                            let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
-                                        }
-                                        Ok(ServerSignal::Close(reason)) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Close { reason }).await;
-                                            break;
-                                        }
-                                        Ok(ServerSignal::Error { code, message }) => {
-                                            let _ = write_frame(&mut send, &CtrlMessage::Error { code, message }).await;
-                                        }
-                                        Err(_) => { break; }
-                                    }
-                                }
-                                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                                    // Idle keepalive ping; ignore errors
-                                    ping_nonce = ping_nonce.wrapping_add(1);
-                                    if write_frame(&mut send, &CtrlMessage::Ping(ping_nonce)).await.is_err() { break; }
+                                    Ok(CtrlMessage::Close { .. }) => { break; }
+                                    Ok(_) => {}
+                                    Err(_) => break,
                                 }
                             }
+                            maybe_cmd = rx_cmd.recv() => {
+                                match maybe_cmd {
+                                    Ok(cmd) => {
+                                        if write_frame(&mut send, &CtrlMessage::Cmd(cmd)).await.is_err() { break; }
+                                    }
+                                    Err(_) => { break; }
+                                }
+                            }
+                            maybe_sig = rx_sig.recv() => {
+                                match maybe_sig {
+                                    Ok(ServerSignal::ReauthRequest) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
+                                    }
+                                    Ok(ServerSignal::UpdateToken(new_tok)) => {
+                                        *expected_token.write().await = new_tok;
+                                        // Optionally notify client to reauth with the new token
+                                        let _ = write_frame(&mut send, &CtrlMessage::ReauthRequest).await;
+                                    }
+                                    Ok(ServerSignal::Close(reason)) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Close { reason }).await;
+                                        break;
+                                    }
+                                    Ok(ServerSignal::Error { code, message }) => {
+                                        let _ = write_frame(&mut send, &CtrlMessage::Error { code, message }).await;
+                                    }
+                                    Err(_) => { break; }
+                                }
+                            }
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                                // Idle keepalive ping; ignore errors
+                                ping_nonce = ping_nonce.wrapping_add(1);
+                                if write_frame(&mut send, &CtrlMessage::Ping(ping_nonce)).await.is_err() { break; }
+                            }
                         }
-                    });
-                }
-            });
-            Ok((local_addr, join, tx_cmd, tx_sig, cert_der))
-        }
+                    }
+                });
+            }
+        });
+        Ok((local_addr, join, tx_cmd, tx_sig, cert_der))
     }
 
     /// Run a control client that connects, authenticates, handles pings, and emits events.
-    #[cfg(feature = "quic")]
     pub async fn run_ctrl_client(addr: SocketAddr, token: String, cfg: CtrlClientConfig) -> Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<CtrlEvent>)> {
-    // Backward-compat shim: default to insecure (dev only). Prefer run_ctrl_client_with_tls.
-    let client_config = build_client_config_tls(TlsMode::InsecureNoVerify, None, None)?;
+        // Backward-compat shim: default to insecure (dev only). Prefer run_ctrl_client_with_tls.
+        let client_config = build_client_config_tls(TlsMode::InsecureNoVerify, None, None)?;
 
         async fn connect_once(addr: SocketAddr, client_config: QuinnClientConfig, token: &str) -> Result<(quinn::Connection, SendStream, RecvStream)> {
             let mut endpoint = Endpoint::client(SocketAddr::from(([127,0,0,1],0)))?;
@@ -625,7 +554,7 @@ pub mod quic_ctrl {
         }
 
         // Event channel
-    let (tx_evt, rx_evt) = mpsc::channel::<CtrlEvent>(32);
+        let (tx_evt, rx_evt) = mpsc::channel::<CtrlEvent>(32);
         let join = tokio::spawn(async move {
             // Reconnect loop with backoff
             let mut attempt: u32 = 0;
@@ -694,7 +623,6 @@ pub mod quic_ctrl {
         Ok((join, rx_evt))
     }
 
-    #[cfg(feature = "quic")]
     #[derive(Clone)]
     pub enum TlsMode {
         // Verify against system roots and optional extra CA
@@ -706,10 +634,11 @@ pub mod quic_ctrl {
         // Insecure: no verification (dev only)
         InsecureNoVerify,
     }
+
     impl std::fmt::Debug for TlsMode {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                TlsMode::SystemRoots { sni, ca_pem } => f.debug_struct("SystemRoots").field("sni", sni).field("ca_pem", &ca_pem.as_ref().map(|v| v.len())).finish(),
+                TlsMode::SystemRoots { sni, ca_pem } => f.debug_struct("SystemRoots").field("sni", sni).field("ca_pem", &ca_pem.as_ref().map(|v: &Vec<u8>| v.len())).finish(),
                 TlsMode::PinSha256 { sni, der_sha256_hex } => f.debug_struct("PinSha256").field("sni", sni).field("der_sha256_hex", der_sha256_hex).finish(),
                 TlsMode::Tofu { sni, .. } => f.debug_struct("Tofu").field("sni", sni).finish(),
                 TlsMode::InsecureNoVerify => write!(f, "InsecureNoVerify"),
@@ -717,7 +646,6 @@ pub mod quic_ctrl {
         }
     }
 
-    #[cfg(feature = "quic")]
     fn build_client_config_tls(mode: TlsMode, cached_pin: Option<String>, cached_ca: Option<Vec<u8>>) -> Result<QuinnClientConfig> {
         // Helper verifiers
         #[derive(Debug)]
@@ -729,8 +657,8 @@ pub mod quic_ctrl {
             fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { vec![SignatureScheme::ECDSA_NISTP256_SHA256, SignatureScheme::ED25519, SignatureScheme::RSA_PSS_SHA256] }
         }
 
-    #[derive(Debug)]
-    struct PinVerifier { sha256_hex: String }
+        #[derive(Debug)]
+        struct PinVerifier { sha256_hex: String }
         impl ServerCertVerifier for PinVerifier {
             fn verify_server_cert(&self, end_entity: &CertificateDer<'_>, _intermediates: &[CertificateDer<'_>], _server_name: &ServerName<'_>, _ocsp: &[u8], _now: UnixTime,) -> std::result::Result<ServerCertVerified, rustls::Error> {
                 let mut hasher = Sha256::new();
@@ -811,7 +739,6 @@ pub mod quic_ctrl {
         Ok(QuinnClientConfig::new(Arc::new(client_crypto)))
     }
 
-    #[cfg(feature = "quic")]
     pub async fn run_ctrl_client_with_tls(addr: SocketAddr, token: String, cfg: CtrlClientConfig, tls: TlsMode, cached_pin: Option<String>, cached_ca: Option<Vec<u8>>) -> Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<CtrlEvent>)> {
         let client_config = build_client_config_tls(tls, cached_pin, cached_ca)?;
         // Reuse the rest of run_ctrl_client logic by inlining the connect loop here
@@ -890,13 +817,12 @@ pub mod quic_ctrl {
     }
 }
 
-#[cfg(all(test, feature = "quic"))]
+#[cfg(test)]
 mod tests {
     use super::quic_ctrl;
     use super::*;
     use sha2::{Digest, Sha256};
     use hex::ToHex;
-    // no extra rustls imports needed here
 
     #[tokio::test]
     async fn quic_echo_heartbeat_smoke() {
@@ -917,9 +843,9 @@ mod tests {
     async fn quic_ctrl_tls_pin_and_tofu() {
         // Start control server with a token
         let bind = SocketAddr::from(([127,0,0,1], 0));
-    let (addr, join, _tx_cmd, _tx_sig, cert_der) = quic_ctrl::start_ctrl_server_with_cert(bind, "tok".into()).await.unwrap();
-    // Compute pin from server's DER
-    let pin = pin_from_der(&cert_der);
+        let (addr, join, _tx_cmd, _tx_sig, cert_der) = quic_ctrl::start_ctrl_server_with_cert(bind, "tok".into()).await.unwrap();
+        // Compute pin from server's DER
+        let pin = pin_from_der(&cert_der);
         assert!(!pin.is_empty());
         // Connect with pin mode
         let tls = quic_ctrl::TlsMode::PinSha256 { sni: "localhost".into(), der_sha256_hex: pin.clone() };

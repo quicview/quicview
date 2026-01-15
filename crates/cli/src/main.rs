@@ -1,15 +1,12 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::QuicViewConfig;
-use proto::{handshake_tcp, parse_host_port, probe_tcp};
-#[cfg(feature = "tls-client")]
-use proto::{handshake_tls, probe_tls};
+use proto::{handshake_tcp, handshake_tls, parse_host_port, probe_tcp, probe_tls};
 use server::run as run_server;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use client::core as client_core;
 #[cfg(feature = "http-ui")]
 use client::http_ui as client_http;
-#[cfg(feature = "quic-ctrl")]
 use transport::quic_ctrl::{self, Cmd as CtrlCmd, ServerSignal};
 
 /// `QuicView` CLI
@@ -87,75 +84,74 @@ enum Commands {
         /// Bearer token to require for POST actions (e.g., start/stop). If omitted, POSTs are open.
         #[arg(long)]
         auth_token: Option<String>,
-    /// Open the browser to the local web UI after starting the server
-    #[arg(long, default_value_t = false)]
-    open: bool,
-    /// Serve static files from this directory (e.g., built Leptos assets)
-    #[arg(long)]
-    static_dir: Option<std::path::PathBuf>,
-    /// Allow binding to non-localhost addresses (use with caution)
-    #[arg(long, default_value_t = false)]
-    allow_external: bool,
-    /// Default MJPEG width (can be overridden via /stream.mjpeg?w=)
-    #[arg(long, default_value_t = 320)]
-    mjpeg_width: u32,
-    /// Default MJPEG height (can be overridden via /stream.mjpeg?h=)
-    #[arg(long, default_value_t = 180)]
-    mjpeg_height: u32,
-    /// Default MJPEG FPS (can be overridden via /stream.mjpeg?fps=)
-    #[arg(long, default_value_t = 5)]
-    mjpeg_fps: u32,
-    /// Default MJPEG JPEG quality 30-95 (can be overridden via /stream.mjpeg?q=)
-    #[arg(long, default_value_t = 70)]
-    mjpeg_quality: u8,
-    /// Allowed CORS origins (CSV); if omitted, CORS is disabled by default
-    #[arg(long)]
-    allowed_origins: Option<String>,
-    /// POST endpoints rate limit: burst
-    #[arg(long, default_value_t = 30.0)]
-    post_burst: f64,
-    /// POST endpoints rate limit: refill per second
-    #[arg(long, default_value_t = 15.0)]
-    post_refill: f64,
-    /// Stream endpoint rate limit: burst
-    #[arg(long, default_value_t = 5.0)]
-    stream_burst: f64,
-    /// Stream endpoint rate limit: refill per second
-    #[arg(long, default_value_t = 2.0)]
-    stream_refill: f64,
-    /// Initial consent allowed state (true/false)
-    #[arg(long, default_value_t = true)]
-    consent_allowed: bool,
-    /// QUIC control server address (e.g., 127.0.0.1:4433); enables control channel when set
-    #[arg(long)]
-    ctrl_addr: Option<String>,
-    /// QUIC control bearer token for handshake/auth
-    #[arg(long)]
-    ctrl_token: Option<String>,
-    /// QUIC heartbeat ping interval (seconds)
-    #[arg(long, default_value_t = 10)]
-    ctrl_ping_secs: u64,
-    /// QUIC reconnect backoff base in milliseconds
-    #[arg(long, default_value_t = 500)]
-    ctrl_backoff_base_ms: u64,
-    /// QUIC reconnect backoff max cap in milliseconds
-    #[arg(long, default_value_t = 32000)]
-    ctrl_backoff_max_ms: u64,
-    /// QUIC TLS mode: one of insecure, system, pin:<hex>, tofu
-    #[arg(long)]
-    ctrl_tls: Option<String>,
-    /// QUIC TLS SNI (required for system/pin/tofu modes)
-    #[arg(long)]
-    ctrl_sni: Option<String>,
-    /// QUIC TLS extra CA PEM file (system mode)
-    #[arg(long)]
-    ctrl_ca_file: Option<std::path::PathBuf>,
-    /// QUIC TLS TOFU pin cache file path (read/write)
-    #[arg(long)]
-    ctrl_tofu_pin_file: Option<std::path::PathBuf>,
+        /// Open the browser to the local web UI after starting the server
+        #[arg(long, default_value_t = false)]
+        open: bool,
+        /// Serve static files from this directory (e.g., built Leptos assets)
+        #[arg(long)]
+        static_dir: Option<std::path::PathBuf>,
+        /// Allow binding to non-localhost addresses (use with caution)
+        #[arg(long, default_value_t = false)]
+        allow_external: bool,
+        /// Default MJPEG width (can be overridden via /stream.mjpeg?w=)
+        #[arg(long, default_value_t = 320)]
+        mjpeg_width: u32,
+        /// Default MJPEG height (can be overridden via /stream.mjpeg?h=)
+        #[arg(long, default_value_t = 180)]
+        mjpeg_height: u32,
+        /// Default MJPEG FPS (can be overridden via /stream.mjpeg?fps=)
+        #[arg(long, default_value_t = 5)]
+        mjpeg_fps: u32,
+        /// Default MJPEG JPEG quality 30-95 (can be overridden via /stream.mjpeg?q=)
+        #[arg(long, default_value_t = 70)]
+        mjpeg_quality: u8,
+        /// Allowed CORS origins (CSV); if omitted, CORS is disabled by default
+        #[arg(long)]
+        allowed_origins: Option<String>,
+        /// POST endpoints rate limit: burst
+        #[arg(long, default_value_t = 30.0)]
+        post_burst: f64,
+        /// POST endpoints rate limit: refill per second
+        #[arg(long, default_value_t = 15.0)]
+        post_refill: f64,
+        /// Stream endpoint rate limit: burst
+        #[arg(long, default_value_t = 5.0)]
+        stream_burst: f64,
+        /// Stream endpoint rate limit: refill per second
+        #[arg(long, default_value_t = 2.0)]
+        stream_refill: f64,
+        /// Initial consent allowed state (true/false)
+        #[arg(long, default_value_t = true)]
+        consent_allowed: bool,
+        /// QUIC control server address (e.g., 127.0.0.1:4433); enables control channel when set
+        #[arg(long)]
+        ctrl_addr: Option<String>,
+        /// QUIC control bearer token for handshake/auth
+        #[arg(long)]
+        ctrl_token: Option<String>,
+        /// QUIC heartbeat ping interval (seconds)
+        #[arg(long, default_value_t = 10)]
+        ctrl_ping_secs: u64,
+        /// QUIC reconnect backoff base in milliseconds
+        #[arg(long, default_value_t = 500)]
+        ctrl_backoff_base_ms: u64,
+        /// QUIC reconnect backoff max cap in milliseconds
+        #[arg(long, default_value_t = 32000)]
+        ctrl_backoff_max_ms: u64,
+        /// QUIC TLS mode: one of insecure, system, pin:<hex>, tofu
+        #[arg(long)]
+        ctrl_tls: Option<String>,
+        /// QUIC TLS SNI (required for system/pin/tofu modes)
+        #[arg(long)]
+        ctrl_sni: Option<String>,
+        /// QUIC TLS extra CA PEM file (system mode)
+        #[arg(long)]
+        ctrl_ca_file: Option<std::path::PathBuf>,
+        /// QUIC TLS TOFU pin cache file path (read/write)
+        #[arg(long)]
+        ctrl_tofu_pin_file: Option<std::path::PathBuf>,
     },
     /// Run a minimal QUIC control server (dev/testing)
-    #[cfg(feature = "quic-ctrl")]
     CtrlServer {
         /// Bind address (default 127.0.0.1:4433)
         #[arg(long)]
@@ -249,14 +245,15 @@ async fn main() -> Result<()> {
             println!("server={host}:{port} {}", if tcp_ok { "up" } else { "down" });
 
             let tls_enabled = cfg.server.effective_tls_enabled() && !cli.no_tls;
-            #[cfg(feature = "tls-client")]
             if tls_enabled {
+                let cfg_sni = cfg.server.effective_tls_sni();
                 let sni = cli
                     .sni
                     .as_deref()
-                    .or(cfg.server.effective_tls_sni().as_deref())
+                    .or(cfg_sni.as_deref())
                     .unwrap_or(host.as_str());
-                let ca_bytes = match cli.ca_file.as_deref().or(cfg.server.effective_tls_ca_file().as_deref()) {
+                let cfg_ca = cfg.server.effective_tls_ca_file();
+                let ca_bytes = match cli.ca_file.as_deref().or(cfg_ca.as_deref()) {
                     Some(p) => std::fs::read(p).ok(),
                     None => None,
                 };
@@ -264,10 +261,6 @@ async fn main() -> Result<()> {
                     .await
                     .is_ok();
                 println!("server.tls_handshake={host}:{port} {}", if tls_ok { "ok" } else { "fail" });
-            }
-            #[cfg(not(feature = "tls-client"))]
-            if tls_enabled {
-                eprintln!("note: TLS requested but this build lacks 'tls-client'; falling back to TCP-only probes");
             }
         }
         Commands::ProbeClient { timeout_ms } => {
@@ -281,14 +274,15 @@ async fn main() -> Result<()> {
             let tcp = probe_tcp(&host, port, timeout_ms).await.is_ok();
             println!("client_probe.tcp={host}:{port} {}", if tcp { "ok" } else { "fail" });
             let tls_enabled = cfg.server.effective_tls_enabled() && !cli.no_tls;
-            #[cfg(feature = "tls-client")]
             if tls_enabled {
+                let cfg_sni = cfg.server.effective_tls_sni();
                 let sni = cli
                     .sni
                     .as_deref()
-                    .or(cfg.server.effective_tls_sni().as_deref())
+                    .or(cfg_sni.as_deref())
                     .unwrap_or(host.as_str());
-                let ca_bytes = match cli.ca_file.as_deref().or(cfg.server.effective_tls_ca_file().as_deref()) {
+                let cfg_ca = cfg.server.effective_tls_ca_file();
+                let ca_bytes = match cli.ca_file.as_deref().or(cfg_ca.as_deref()) {
                     Some(p) => std::fs::read(p).ok(),
                     None => None,
                 };
@@ -302,12 +296,6 @@ async fn main() -> Result<()> {
                 .await
                 .is_ok();
                 println!("client_probe.tls={host}:{port} {}", if tls { "ok" } else { "fail" });
-            }
-            #[cfg(not(feature = "tls-client"))]
-            if tls_enabled {
-                eprintln!(
-                    "note: TLS requested but this build lacks 'tls-client'; skipping TLS probe"
-                );
             }
         }
         Commands::ClientHandshake { timeout_ms } => {
@@ -331,14 +319,15 @@ async fn main() -> Result<()> {
                 cfg.server.auth_token.clone().or_else(|| std::env::var("DLNK_KEY").ok())
             };
             let tls_enabled = cfg.server.effective_tls_enabled() && !cli.no_tls;
-            #[cfg(feature = "tls-client")]
             let res = if tls_enabled {
+                let cfg_sni = cfg.server.effective_tls_sni();
                 let sni = cli
                     .sni
                     .as_deref()
-                    .or(cfg.server.effective_tls_sni().as_deref())
+                    .or(cfg_sni.as_deref())
                     .unwrap_or(host.as_str());
-                let ca_bytes = match cli.ca_file.as_deref().or(cfg.server.effective_tls_ca_file().as_deref()) {
+                let cfg_ca = cfg.server.effective_tls_ca_file();
+                let ca_bytes = match cli.ca_file.as_deref().or(cfg_ca.as_deref()) {
                     Some(p) => std::fs::read(p).ok(),
                     None => None,
                 };
@@ -360,25 +349,6 @@ async fn main() -> Result<()> {
                 )
                 .await
             };
-            #[cfg(not(feature = "tls-client"))]
-            let res = if tls_enabled {
-                eprintln!("note: TLS requested but this build lacks 'tls-client'; falling back to TCP handshake");
-                handshake_tcp(
-                    &host,
-                    port,
-                    timeout_ms,
-                    auth_key.as_deref().map(str::as_bytes),
-                )
-                .await
-            } else {
-                handshake_tcp(
-                    &host,
-                    port,
-                    timeout_ms,
-                    auth_key.as_deref().map(str::as_bytes),
-                )
-                .await
-            };
             match res {
                 Ok(()) => println!("client_handshake.ok {host}:{port}"),
                 Err(e) => {
@@ -387,7 +357,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-    Commands::Client { bind, port, start, auth_token, open, static_dir, allow_external, mjpeg_width, mjpeg_height, mjpeg_fps, mjpeg_quality, allowed_origins, post_burst: _post_burst, post_refill: _post_refill, stream_burst: _stream_burst, stream_refill: _stream_refill, consent_allowed: _consent_allowed, ctrl_addr: _ctrl_addr, ctrl_token: _ctrl_token, ctrl_ping_secs: _ctrl_ping_secs, ctrl_backoff_base_ms: _ctrl_backoff_base_ms, ctrl_backoff_max_ms: _ctrl_backoff_max_ms, ctrl_tls: _ctrl_tls, ctrl_sni: _ctrl_sni, ctrl_ca_file: _ctrl_ca_file, ctrl_tofu_pin_file: _ctrl_tofu_pin_file } => {
+        Commands::Client { bind, port, start, auth_token, open, static_dir, allow_external, mjpeg_width, mjpeg_height, mjpeg_fps, mjpeg_quality, allowed_origins, post_burst, post_refill, stream_burst, stream_refill, consent_allowed, ctrl_addr, ctrl_token, ctrl_ping_secs, ctrl_backoff_base_ms, ctrl_backoff_max_ms, ctrl_tls, ctrl_sni, ctrl_ca_file, ctrl_tofu_pin_file } => {
             // Initialize headless client and start HTTP control server
             let client = client_core::Client::new();
             let bind_addr = SocketAddr::new(bind.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)), port);
@@ -418,30 +388,29 @@ async fn main() -> Result<()> {
             }
             #[cfg(feature = "http-ui")]
             {
-        if start {
+                if start {
                     let _ = client.start().await;
                 }
                 // Start QUIC control channel if configured (let client core own it, with TLS trust state)
-                #[cfg(feature = "quic-ctrl")]
-        if let (Some(addr_s), Some(tok)) = (_ctrl_addr.as_deref(), _ctrl_token.as_deref()) {
+                if let (Some(addr_s), Some(tok)) = (ctrl_addr.as_deref(), ctrl_token.as_deref()) {
                     let addr: SocketAddr = addr_s.parse().unwrap_or_else(|_| SocketAddr::from(([127,0,0,1], 4433)));
                     // Determine TLS mode
                     use transport::quic_ctrl::TlsMode;
-                    let tls_mode = match _ctrl_tls.as_deref().unwrap_or("insecure") {
+                    let tls_mode = match ctrl_tls.as_deref().unwrap_or("insecure") {
                         "insecure" => TlsMode::InsecureNoVerify,
                         "system" => {
-                            let sni = _ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
-                            let ca_pem = match _ctrl_ca_file.as_ref() { Some(p) => std::fs::read(p).ok(), None => None };
+                            let sni = ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
+                            let ca_pem = match ctrl_ca_file.as_ref() { Some(p) => std::fs::read(p).ok(), None => None };
                             TlsMode::SystemRoots { sni, ca_pem }
                         }
                         m if m.starts_with("pin:") => {
-                            let sni = _ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
+                            let sni = ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
                             let pin = m.trim_start_matches("pin:").to_string();
                             TlsMode::PinSha256 { sni, der_sha256_hex: pin }
                         }
                         "tofu" => {
-                            let sni = _ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
-                            let pin_file = _ctrl_tofu_pin_file.clone();
+                            let sni = ctrl_sni.clone().unwrap_or_else(|| "localhost".into());
+                            let pin_file = ctrl_tofu_pin_file.clone();
                             let on_first = std::sync::Arc::new(move |pin: String| {
                                 if let Some(ref p) = pin_file {
                                     let _ = std::fs::write(p, &pin);
@@ -453,15 +422,15 @@ async fn main() -> Result<()> {
                         other => { eprintln!("unknown --ctrl-tls mode: {} (use insecure|system|pin:<hex>|tofu)", other); TlsMode::InsecureNoVerify }
                     };
                     // Load cached pin or CA
-                    let cached_pin = _ctrl_tofu_pin_file.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.trim().to_string());
-                    let cached_ca = _ctrl_ca_file.as_ref().and_then(|p| std::fs::read(p).ok());
+                    let cached_pin = ctrl_tofu_pin_file.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.trim().to_string());
+                    let cached_ca = ctrl_ca_file.as_ref().and_then(|p| std::fs::read(p).ok());
                     // Delegate to client core to start and manage ctrl channel and status
                     let res = client.start_with_ctrl_tls_tuned(
                         addr,
                         tok.to_string(),
-                        _ctrl_ping_secs,
-                        _ctrl_backoff_base_ms,
-                        _ctrl_backoff_max_ms,
+                        ctrl_ping_secs,
+                        ctrl_backoff_base_ms,
+                        ctrl_backoff_max_ms,
                         tls_mode,
                         cached_pin,
                         cached_ca,
@@ -476,8 +445,8 @@ async fn main() -> Result<()> {
                     default_fps: mjpeg_fps,
                     default_quality: mjpeg_quality,
                 };
-        let allow = allowed_origins.as_ref().map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>());
-        let handle = client_http::serve(bind_addr, client, auth_token.clone(), static_dir, Some(defaults), allow, Some((_post_burst, _post_refill)), Some((_stream_burst, _stream_refill)), Some(_consent_allowed)).await?;
+                let allow = allowed_origins.as_ref().map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>());
+                let handle = client_http::serve(bind_addr, client, auth_token.clone(), static_dir, Some(defaults), allow, Some((post_burst, post_refill)), Some((stream_burst, stream_refill)), Some(consent_allowed)).await?;
                 println!("client_http.started addr={}", handle.addr);
                 if open {
                     let url = if let Some(tok) = auth_token.as_ref() {
@@ -506,12 +475,11 @@ async fn main() -> Result<()> {
             }
             #[cfg(not(feature = "http-ui"))]
             {
-                let _ = (bind_addr, start, auth_token, open, static_dir, allow_external, mjpeg_width, mjpeg_height, mjpeg_fps, mjpeg_quality, client, allowed_origins); // silence unused
+                let _ = (bind_addr, start, auth_token, open, static_dir, allow_external, mjpeg_width, mjpeg_height, mjpeg_fps, mjpeg_quality, client, allowed_origins, post_burst, post_refill, stream_burst, stream_refill, consent_allowed, ctrl_addr, ctrl_token, ctrl_ping_secs, ctrl_backoff_base_ms, ctrl_backoff_max_ms, ctrl_tls, ctrl_sni, ctrl_ca_file, ctrl_tofu_pin_file);
                 eprintln!("this build lacks 'http-ui' feature; rebuild CLI enabling client/http-ui");
                 std::process::exit(7);
             }
         }
-        #[cfg(feature = "quic-ctrl")]
         Commands::CtrlServer { bind, token } => {
             // Start QUIC control server and simple stdin REPL for commands
             let bind = bind.unwrap_or_else(|| SocketAddr::from(([127,0,0,1], 4433)));
@@ -521,7 +489,6 @@ async fn main() -> Result<()> {
             loop {
                 // Read a line from stdin in a blocking task to avoid depending on tokio's io-std feature
                 let read = tokio::task::spawn_blocking(|| -> std::io::Result<Option<String>> {
-                    use std::io::Read as _;
                     let mut s = String::new();
                     // Use std::io::stdin blocking read_line
                     let n = std::io::stdin().read_line(&mut s)?;
@@ -553,5 +520,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
-// split_host_port_default is superseded by proto::parse_host_port

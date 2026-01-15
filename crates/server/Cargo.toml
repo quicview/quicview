@@ -7,7 +7,6 @@ description = "QuicView server with QUIC data streams, health endpoints, and scr
 
 [features]
 default = []
-quic-server = ["quinn", "rustls", "rcgen", "transport"]
 
 [dependencies]
 anyhow = "1.0"
@@ -25,12 +24,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 config = { path = "../config" }
+transport = { path = "../transport" }
 
-# QUIC server dependencies (optional)
-quinn = { version = "0.11", optional = true, default-features = false, features = ["rustls-ring", "runtime-tokio"] }
-rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
-rcgen = { version = "0.12", optional = true }
-transport = { path = "../transport", optional = true }
+# QUIC server dependencies (core, always included)
+quinn = { version = "0.11", default-features = false, features = ["rustls-ring", "runtime-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = "0.12"
 
 # Explicit placeholder lib to prevent Cargo from auto-discovering and building src/lib.rs
 [lib]

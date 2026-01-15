@@ -32,16 +32,12 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[cfg(feature = "quic")]
 use quinn::{
     Connection, Endpoint, RecvStream, SendStream,
     ServerConfig as QuinnServerConfig, ClientConfig as QuinnClientConfig,
 };
-#[cfg(feature = "quic")]
 use quinn::crypto::rustls as quinn_rustls;
-#[cfg(feature = "quic")]
 use rustls::pki_types::CertificateDer;
-#[cfg(feature = "quic")]
 use tokio::sync::mpsc;
 
 /// ALPN protocol identifier for QuicView data streams
@@ -150,7 +146,6 @@ pub enum ClipboardMessage {
 // ============================================================================
 
 /// Write a length-prefixed frame to a QUIC send stream
-#[cfg(feature = "quic")]
 pub async fn write_frame(send: &mut SendStream, data: &[u8]) -> Result<()> {
     let len = data.len() as u32;
     send.write_all(&len.to_be_bytes()).await?;
@@ -159,7 +154,6 @@ pub async fn write_frame(send: &mut SendStream, data: &[u8]) -> Result<()> {
 }
 
 /// Read a length-prefixed frame from a QUIC recv stream
-#[cfg(feature = "quic")]
 pub async fn read_frame(recv: &mut RecvStream, max_size: usize) -> Result<Bytes> {
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await.context("read frame length")?;
@@ -173,14 +167,12 @@ pub async fn read_frame(recv: &mut RecvStream, max_size: usize) -> Result<Bytes>
 }
 
 /// Write a JSON-serializable message as a frame
-#[cfg(feature = "quic")]
 pub async fn write_json_frame<T: Serialize>(send: &mut SendStream, msg: &T) -> Result<()> {
     let payload = serde_json::to_vec(msg)?;
     write_frame(send, &payload).await
 }
 
 /// Read a JSON-deserializable message from a frame
-#[cfg(feature = "quic")]
 pub async fn read_json_frame<T: for<'de> Deserialize<'de>>(recv: &mut RecvStream, max_size: usize) -> Result<T> {
     let data = read_frame(recv, max_size).await?;
     let msg: T = serde_json::from_slice(&data)?;
@@ -216,7 +208,6 @@ impl Default for DataServerConfig {
 }
 
 /// Handle to a running data server
-#[cfg(feature = "quic")]
 pub struct DataServerHandle {
     /// Local address the server is bound to
     pub addr: SocketAddr,
@@ -228,7 +219,6 @@ pub struct DataServerHandle {
     join: tokio::task::JoinHandle<()>,
 }
 
-#[cfg(feature = "quic")]
 impl DataServerHandle {
     /// Get the local address
     pub fn local_addr(&self) -> SocketAddr {
@@ -261,7 +251,6 @@ pub enum DataServerEvent {
 /// Start a QUIC data server
 ///
 /// Returns a handle and a receiver for server events.
-#[cfg(feature = "quic")]
 pub async fn start_data_server(
     config: DataServerConfig,
 ) -> Result<(DataServerHandle, mpsc::Receiver<DataServerEvent>)> {
@@ -378,7 +367,6 @@ pub async fn start_data_server(
 }
 
 /// Handle an incoming stream from a client
-#[cfg(feature = "quic")]
 async fn handle_client_stream(
     client_id: u64,
     stream_type: StreamType,
@@ -462,13 +450,11 @@ impl Default for DataClientConfig {
 }
 
 /// Handle to a data client connection
-#[cfg(feature = "quic")]
 pub struct DataClient {
     connection: Connection,
     config: DataClientConfig,
 }
 
-#[cfg(feature = "quic")]
 impl DataClient {
     /// Connect to a QuicView server
     pub async fn connect(config: DataClientConfig) -> Result<Self> {
@@ -522,13 +508,11 @@ impl DataClient {
 }
 
 /// Receiver for screen frames
-#[cfg(feature = "quic")]
 pub struct ScreenReceiver {
     recv: RecvStream,
     max_frame_size: usize,
 }
 
-#[cfg(feature = "quic")]
 impl ScreenReceiver {
     /// Receive the next screen frame
     pub async fn recv(&mut self) -> Result<ScreenFrame> {
@@ -537,12 +521,10 @@ impl ScreenReceiver {
 }
 
 /// Sender for input events
-#[cfg(feature = "quic")]
 pub struct InputSender {
     send: SendStream,
 }
 
-#[cfg(feature = "quic")]
 impl InputSender {
     /// Send an input event
     pub async fn send(&mut self, event: &InputEvent) -> Result<()> {
@@ -551,12 +533,10 @@ impl InputSender {
 }
 
 /// Sender for clipboard messages
-#[cfg(feature = "quic")]
 pub struct ClipboardSender {
     send: SendStream,
 }
 
-#[cfg(feature = "quic")]
 impl ClipboardSender {
     /// Send a clipboard message
     pub async fn send(&mut self, msg: &ClipboardMessage) -> Result<()> {
@@ -565,13 +545,11 @@ impl ClipboardSender {
 }
 
 /// Receiver for clipboard messages
-#[cfg(feature = "quic")]
 pub struct ClipboardReceiver {
     recv: RecvStream,
     max_frame_size: usize,
 }
 
-#[cfg(feature = "quic")]
 impl ClipboardReceiver {
     /// Receive a clipboard message
     pub async fn recv(&mut self) -> Result<ClipboardMessage> {
@@ -583,7 +561,6 @@ impl ClipboardReceiver {
 // TLS Configuration Helpers
 // ============================================================================
 
-#[cfg(feature = "quic")]
 fn build_data_client_config(mode: &TlsMode) -> Result<QuinnClientConfig> {
     use rustls::{
         client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -672,7 +649,7 @@ fn build_data_client_config(mode: &TlsMode) -> Result<QuinnClientConfig> {
 // Tests
 // ============================================================================
 
-#[cfg(all(test, feature = "quic"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

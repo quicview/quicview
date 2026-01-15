@@ -33,24 +33,19 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock, Notify};
 use tracing::{debug, info};
 
-#[cfg(feature = "quic-server")]
 use transport::quic_data::{
     ClipboardMessage, InputEvent,
     ScreenEncoding, ScreenFrame, StreamType,
 };
 
-#[cfg(feature = "quic-server")]
 use quinn::{
     Connection, Endpoint, RecvStream, SendStream,
     ServerConfig as QuinnServerConfig,
 };
-#[cfg(feature = "quic-server")]
 use quinn::crypto::rustls as quinn_rustls;
-#[cfg(feature = "quic-server")]
 use rustls::pki_types::CertificateDer;
 
 /// ALPN protocol identifier
-#[cfg(feature = "quic-server")]
 pub const ALPN_QUICVIEW: &[u8] = b"quicview/1";
 
 /// Configuration for the QUIC server
@@ -106,7 +101,6 @@ pub enum QuicServerEvent {
 }
 
 /// Connected client state
-#[cfg(feature = "quic-server")]
 struct ClientState {
     _id: u64,
     _addr: SocketAddr,
@@ -116,7 +110,6 @@ struct ClientState {
 }
 
 /// Handle to a running QUIC server
-#[cfg(feature = "quic-server")]
 pub struct QuicServerHandle {
     /// Local address
     pub addr: SocketAddr,
@@ -128,7 +121,6 @@ pub struct QuicServerHandle {
     screen_broadcast_tx: mpsc::Sender<ScreenFrame>,
 }
 
-#[cfg(feature = "quic-server")]
 impl QuicServerHandle {
     /// Get the local address
     pub fn local_addr(&self) -> SocketAddr {
@@ -154,7 +146,6 @@ impl QuicServerHandle {
 }
 
 /// Start the QUIC server
-#[cfg(feature = "quic-server")]
 pub async fn start_quic_server(
     config: QuicServerConfig,
 ) -> Result<(QuicServerHandle, mpsc::Receiver<QuicServerEvent>)> {
@@ -361,7 +352,6 @@ pub async fn start_quic_server(
 }
 
 /// Handle an incoming stream from a client
-#[cfg(feature = "quic-server")]
 async fn handle_client_stream(
     client_id: u64,
     stream_type: StreamType,
@@ -406,7 +396,6 @@ async fn handle_client_stream(
 }
 
 /// Helper to read a JSON frame
-#[cfg(feature = "quic-server")]
 async fn read_json_frame<T: serde::de::DeserializeOwned>(
     recv: &mut RecvStream,
     max_size: usize,
@@ -428,7 +417,6 @@ async fn read_json_frame<T: serde::de::DeserializeOwned>(
 // ============================================================================
 
 /// Screen capturer that produces frames for the QUIC server
-#[cfg(feature = "quic-server")]
 pub struct ScreenCapturer {
     /// Target FPS
     pub fps: u32,
@@ -438,7 +426,6 @@ pub struct ScreenCapturer {
     shutdown: Arc<Notify>,
 }
 
-#[cfg(feature = "quic-server")]
 impl ScreenCapturer {
     /// Create a new screen capturer
     pub fn new(fps: u32, quality: u8) -> Self {
@@ -494,12 +481,10 @@ impl ScreenCapturer {
 // ============================================================================
 
 /// Input injector that processes input events from clients
-#[cfg(feature = "quic-server")]
 pub struct InputInjector {
     // In real implementation, this would hold enigo::Enigo
 }
 
-#[cfg(feature = "quic-server")]
 impl InputInjector {
     /// Create a new input injector
     pub fn new() -> Result<Self> {
@@ -531,7 +516,6 @@ impl InputInjector {
     }
 }
 
-#[cfg(feature = "quic-server")]
 impl Default for InputInjector {
     fn default() -> Self {
         Self::new().expect("input injector")
@@ -542,7 +526,7 @@ impl Default for InputInjector {
 // Tests
 // ============================================================================
 
-#[cfg(all(test, feature = "quic-server"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

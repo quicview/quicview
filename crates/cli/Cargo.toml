@@ -3,17 +3,12 @@ name = "cli"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "QuicView CLI for managing configuration and running protocol probes"
+description = "QuicView CLI for managing configuration and running client/server"
 
 [features]
 default = []
-tls-client = ["proto/tls-client"]
-# No-op feature to align with docs that reference `--features server`
-server = []
 # Enable starting the client HTTP control server from CLI
 http-ui = ["client/http-ui"]
-# Enable QUIC control channel integration from CLI builds
-quic-ctrl = ["client/quic-ctrl", "transport"]
 # Enable macOS input injection support in client from CLI builds
 macos-input = ["client/macos-input"]
 # Enable macOS screen capture provider in client from CLI builds
@@ -31,6 +26,6 @@ proto = { path = "../proto" }
 tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "time", "signal"] }
 server = { path = "../server" }
 client = { path = "../client", default-features = false }
-transport = { path = "../transport", optional = true }
+transport = { path = "../transport" }
 webbrowser = "0.8"
 urlencoding = "2"
