@@ -204,12 +204,74 @@ pub async fn run(cfg: &QuicViewConfig) -> Result<ServerHandle> {
     let ready = Arc::new(ReadyState::new());
     let shutdown = Arc::new(Notify::new());
 
-    // No external child processes by default; readiness reflects our own listeners.
-    ready.set_expected(1);
-    ready.child_started();
+    // We expect 2 subsystems: health + QUIC
+    ready.set_expected(2);
+    ready.child_started(); // health server counts as started
 
     let handle = run_health_server(addr, ready.clone(), shutdown.clone()).await?;
     info!(addr = %handle.addr, "server started: health and readiness endpoints active");
+
+    // Start QUIC server on the main port (default 21116, or from config)
+    let quic_host = cfg.server.quic_bind.clone().unwrap_or_else(|| "0.0.0.0".to_string());
+    let quic_port = cfg.server.effective_port();
+    let quic_addr: SocketAddr = format!("{quic_host}:{quic_port}").parse()?;
+    
+    let quic_cfg = QuicServerConfig {
+        bind: quic_addr,
+        ..Default::default()
+    };
+    
+    let shutdown_quic = shutdown.clone();
+    let ready_quic = ready.clone();
+    tokio::spawn(async move {
+        match start_quic_server(quic_cfg).await {
+            Ok((quic_handle, mut events)) => {
+                info!(addr = %quic_handle.local_addr(), "QUIC server listening");
+                ready_quic.child_started();
+                
+                // Process events until shutdown
+                loop {
+                    tokio::select! {
+                        _ = shutdown_quic.notified() => {
+                            info!("QUIC server: shutdown signaled");
+                            quic_handle.shutdown().await;
+                            break;
+                        }
+                        event = events.recv() => {
+                            match event {
+                                Some(QuicServerEvent::ClientConnected { id, addr }) => {
+                                    info!(client_id = id, %addr, "QUIC client connected");
+                                }
+                                Some(QuicServerEvent::ClientDisconnected { id, reason }) => {
+                                    info!(client_id = id, %reason, "QUIC client disconnected");
+                                }
+                                Some(QuicServerEvent::InputReceived { client_id, .. }) => {
+                                    tracing::trace!(client_id, "input received");
+                                }
+                                Some(QuicServerEvent::ClipboardReceived { client_id, .. }) => {
+                                    tracing::trace!(client_id, "clipboard received");
+                                }
+                                Some(QuicServerEvent::Error { message }) => {
+                                    error!(%message, "QUIC server error");
+                                }
+                                Some(QuicServerEvent::Started { addr }) => {
+                                    info!(%addr, "QUIC server started");
+                                }
+                                Some(QuicServerEvent::Stopped) => {
+                                    info!("QUIC server stopped");
+                                    break;
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "failed to start QUIC server");
+            }
+        }
+    });
 
     Ok(ServerHandle { shutdown, ..handle })
 }

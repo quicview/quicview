@@ -141,6 +141,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub health_port: Option<u16>,
     
+    /// QUIC server bind address (e.g., "0.0.0.0"). Defaults to "0.0.0.0".
+    #[serde(default)]
+    pub quic_bind: Option<String>,
+    
     /// Client-side TLS CA bundle path.
     #[serde(default)]
     pub client_tls_ca_path: Option<String>,
@@ -177,6 +181,7 @@ impl Default for ServerConfig {
             relay_bind: None,
             health_bind: None,
             health_port: None,
+            quic_bind: None,
             client_tls_ca_path: None,
             client_tls_sni: None,
         }
