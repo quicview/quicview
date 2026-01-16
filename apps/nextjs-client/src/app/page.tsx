@@ -2,607 +2,412 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-interface CtrlStatus {
-  connected: boolean;
-  reconnects: number;
-  attempts: number;
-  last_error?: string;
-  ping_interval_secs?: number;
-  backoff_base_ms?: number;
-  backoff_max_ms?: number;
-}
+type ViewMode = 'login' | 'desktop' | 'terminal';
 
-interface DisplayInfo {
-  id: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  is_main: boolean;
-}
-
-interface ServerEntry {
-  name: string;
-  url: string;
-  token: string;
+interface ServerInfo {
+  mode: 'desktop' | 'terminal';
+  has_display: boolean;
 }
 
 export default function Home() {
-  // Connection settings
-  const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:8082');
+  // View state
+  const [view, setView] = useState<ViewMode>('login');
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  
+  // Connection
+  const [server, setServer] = useState('');
   const [token, setToken] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState('');
   
-  // Stream settings
-  const [width, setWidth] = useState(1280);
-  const [height, setHeight] = useState(720);
-  const [fps, setFps] = useState(15);
-  const [quality, setQuality] = useState(70);
+  // Session state
+  const [connected, setConnected] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   
-  // State
-  const [status, setStatus] = useState<'unknown' | 'running' | 'stopped' | 'error'>('unknown');
-  const [consentAllowed, setConsentAllowed] = useState(false);
-  const [ctrlStatus, setCtrlStatus] = useState<CtrlStatus | null>(null);
-  const [remoteControl, setRemoteControl] = useState(false);
-  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
-  const [selectedDisplay, setSelectedDisplay] = useState<number | null>(null);
+  // Stream settings (from config, not shown to user)
+  const [width, setWidth] = useState(1920);
+  const [height, setHeight] = useState(1080);
+  const [fps] = useState(30);
+  const [quality] = useState(80);
   
-  // Server registry
-  const [servers, setServers] = useState<ServerEntry[]>([]);
-  const [selectedServer, setSelectedServer] = useState<number | null>(null);
-  const [newServerName, setNewServerName] = useState('');
-  
-  // Clipboard
-  const [clipboard, setClipboard] = useState('');
-  
-  // Stream viewer ref
+  // Refs
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const controlsTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Load settings from localStorage
+  // Load saved connection
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('quicview.settings');
+      const saved = localStorage.getItem('quicview.connection');
       if (saved) {
         try {
           const s = JSON.parse(saved);
-          if (s.baseUrl) setBaseUrl(s.baseUrl);
+          if (s.server) setServer(s.server);
           if (s.token) setToken(s.token);
-          if (s.width) setWidth(s.width);
-          if (s.height) setHeight(s.height);
-          if (s.fps) setFps(s.fps);
-          if (s.quality) setQuality(s.quality);
-          if (s.servers) setServers(s.servers);
         } catch {}
       }
     }
   }, []);
 
-  // Save settings to localStorage
+  // Fit to window
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('quicview.settings', JSON.stringify({
-        baseUrl, token, width, height, fps, quality, servers
-      }));
-    }
-  }, [baseUrl, token, width, height, fps, quality, servers]);
+    const updateSize = () => {
+      setWidth(window.innerWidth);
+      setHeight(window.innerHeight);
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
 
-  // Fetch status
-  const fetchStatus = useCallback(async () => {
+  // Connect to server
+  const connect = async () => {
+    if (!server) {
+      setError('Enter server address');
+      return;
+    }
+    
+    setConnecting(true);
+    setError('');
+    
     try {
+      // Normalize URL
+      let url = server;
+      if (!url.startsWith('http')) url = `http://${url}`;
+      if (!url.includes(':')) url = `${url}:8082`;
+      
       const headers: HeadersInit = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${baseUrl}/status`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setStatus(data.running ? 'running' : 'stopped');
-        setConsentAllowed(data.consent_allowed ?? false);
-        if (data.ctrl) setCtrlStatus(data.ctrl);
-      } else {
-        setStatus('error');
+      
+      // Check server status
+      const res = await fetch(`${url}/status`, { headers });
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Invalid token');
+        throw new Error('Connection failed');
       }
-    } catch {
-      setStatus('error');
-    }
-  }, [baseUrl, token]);
-
-  // Fetch displays
-  const fetchDisplays = useCallback(async () => {
-    try {
-      const headers: HeadersInit = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${baseUrl}/displays`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setDisplays(data.displays || []);
-        if (data.selected !== undefined) setSelectedDisplay(data.selected);
+      
+      const data = await res.json();
+      
+      // Determine mode based on server capabilities
+      const hasDisplay = data.has_display ?? true;
+      const mode = hasDisplay ? 'desktop' : 'terminal';
+      
+      setServerInfo({ mode, has_display: hasDisplay });
+      
+      // Save connection
+      localStorage.setItem('quicview.connection', JSON.stringify({ server: url, token }));
+      setServer(url);
+      
+      // Start streaming if not already
+      if (!data.running) {
+        await fetch(`${url}/start`, { method: 'POST', headers });
       }
-    } catch {}
-  }, [baseUrl, token]);
-
-  // Initial fetch
-  useEffect(() => {
-    fetchStatus();
-    fetchDisplays();
-    const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
-  }, [fetchStatus, fetchDisplays]);
-
-  // Actions
-  const postAction = async (endpoint: string, body?: object) => {
-    try {
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      await fetch(`${baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers,
-        body: body ? JSON.stringify(body) : undefined
-      });
-      await fetchStatus();
-    } catch {}
-  };
-
-  const handleStart = () => postAction('/start');
-  const handleStop = () => postAction('/stop');
-  const handleAllow = () => postAction('/consent/allow');
-  const handleDeny = () => postAction('/consent/deny');
-
-  const handleSelectDisplay = async (id: number) => {
-    setSelectedDisplay(id);
-    await postAction('/displays/select', { id });
-  };
-
-  const handleReadClipboard = async () => {
-    try {
-      const headers: HeadersInit = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${baseUrl}/clipboard`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setClipboard(data.text || '');
-      }
-    } catch {}
-  };
-
-  const handleWriteClipboard = async () => {
-    await postAction('/clipboard', { text: clipboard });
-  };
-
-  // Presets
-  const applyPreset = (preset: 'low' | 'medium' | 'high' | 'ultra') => {
-    switch (preset) {
-      case 'low': setWidth(640); setHeight(360); setFps(10); setQuality(60); break;
-      case 'medium': setWidth(1280); setHeight(720); setFps(15); setQuality(70); break;
-      case 'high': setWidth(1920); setHeight(1080); setFps(30); setQuality(80); break;
-      case 'ultra': setWidth(2560); setHeight(1440); setFps(60); setQuality(90); break;
+      
+      setConnected(true);
+      setView(mode);
+      
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Connection failed');
+    } finally {
+      setConnecting(false);
     }
   };
 
-  // Server registry
-  const addServer = () => {
-    const name = newServerName || baseUrl;
-    setServers([...servers, { name, url: baseUrl, token }]);
-    setNewServerName('');
-  };
+  // Disconnect
+  const disconnect = useCallback(() => {
+    setConnected(false);
+    setView('login');
+    setServerInfo(null);
+  }, []);
 
-  const loadServer = (idx: number) => {
-    const s = servers[idx];
-    if (s) {
-      setBaseUrl(s.url);
-      setToken(s.token);
-      setSelectedServer(idx);
+  // Show controls on mouse move (auto-hide)
+  const showControls = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    controlsTimeout.current = setTimeout(() => setControlsVisible(false), 3000);
+  }, []);
+
+  // Toggle fullscreen
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen();
+      setFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setFullscreen(false);
     }
-  };
+  }, []);
 
-  const removeServer = (idx: number) => {
-    setServers(servers.filter((_, i) => i !== idx));
-    if (selectedServer === idx) setSelectedServer(null);
-  };
+  // Input handlers
+  const headers = useCallback((): HeadersInit => {
+    const h: HeadersInit = { 'Content-Type': 'application/json' };
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
+  }, [token]);
 
-  // Stream URL
-  const streamUrl = `${baseUrl}/stream.mjpeg?w=${width}&h=${height}&fps=${fps}&q=${quality}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
-
-  // Mouse/keyboard input handlers
-  const sendMouse = async (payload: object) => {
-    if (!remoteControl) return;
+  const sendMouse = useCallback(async (payload: object) => {
     try {
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      await fetch(`${baseUrl}/input/mouse`, { method: 'POST', headers, body: JSON.stringify(payload) });
+      await fetch(`${server}/input/mouse`, { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
     } catch {}
-  };
+  }, [server, headers]);
 
-  const sendKey = async (payload: object) => {
-    if (!remoteControl) return;
+  const sendKey = useCallback(async (payload: object) => {
     try {
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      await fetch(`${baseUrl}/input/key`, { method: 'POST', headers, body: JSON.stringify(payload) });
+      await fetch(`${server}/input/key`, { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
     } catch {}
-  };
+  }, [server, headers]);
 
-  const mapCoords = (clientX: number, clientY: number): [number, number] => {
+  const mapCoords = useCallback((clientX: number, clientY: number): [number, number] => {
     if (!imgRef.current) return [0, 0];
     const rect = imgRef.current.getBoundingClientRect();
-    const rx = clientX - rect.left;
-    const ry = clientY - rect.top;
-    const x = (rx / rect.width) * width;
-    const y = (ry / rect.height) * height;
+    const x = ((clientX - rect.left) / rect.width) * width;
+    const y = ((clientY - rect.top) / rect.height) * height;
     return [x, y];
-  };
+  }, [width, height]);
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      {/* Header */}
-      <header className="border-b border-slate-700 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center font-bold text-sm">
-              QV
+  // Stream URL
+  const streamUrl = `${server}/stream.mjpeg?w=${width}&h=${height}&fps=${fps}&q=${quality}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+
+  // ============ LOGIN SCREEN ============
+  if (view === 'login') {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          {/* Logo */}
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-cyan-400 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
             </div>
-            <h1 className="text-xl font-semibold">QuicView</h1>
+            <h1 className="text-2xl font-semibold text-white">QuicView</h1>
+            <p className="text-sm text-gray-500 mt-1">Remote Desktop Access</p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
-              status === 'running' ? 'bg-green-500/20 text-green-400' :
-              status === 'stopped' ? 'bg-yellow-500/20 text-yellow-400' :
-              status === 'error' ? 'bg-red-500/20 text-red-400' :
-              'bg-slate-500/20 text-slate-400'
-            }`}>
-              <div className={`w-2 h-2 rounded-full ${
-                status === 'running' ? 'bg-green-400 animate-pulse' :
-                status === 'stopped' ? 'bg-yellow-400' :
-                status === 'error' ? 'bg-red-400' :
-                'bg-slate-400'
-              }`} />
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </div>
-            {ctrlStatus && (
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
-                ctrlStatus.connected ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-500/20 text-slate-400'
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${ctrlStatus.connected ? 'bg-cyan-400' : 'bg-slate-400'}`} />
-                QUIC {ctrlStatus.connected ? 'Connected' : 'Disconnected'}
+
+          {/* Login Form */}
+          <div className="bg-[#111] rounded-2xl p-6 border border-gray-800">
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 block mb-2">Server</label>
+                <input
+                  type="text"
+                  value={server}
+                  onChange={(e) => setServer(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && connect()}
+                  className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-colors"
+                  placeholder="192.168.1.100:8082"
+                  autoFocus
+                />
               </div>
-            )}
+              <div>
+                <label className="text-xs text-gray-400 block mb-2">Token <span className="text-gray-600">(optional)</span></label>
+                <input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && connect()}
+                  className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-colors"
+                  placeholder="••••••••"
+                />
+              </div>
+              
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+              
+              <button
+                onClick={connect}
+                disabled={connecting}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-lg px-4 py-3 font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                {connecting ? (
+                  <>
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    Connect
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <p className="text-center text-gray-600 text-xs mt-6">
+            Secure connection over QUIC
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ============ DESKTOP VIEW ============
+  if (view === 'desktop') {
+    return (
+      <div
+        ref={containerRef}
+        className="fixed inset-0 bg-black cursor-none"
+        tabIndex={0}
+        onMouseDown={(e) => {
+          if (!imgRef.current) return;
+          const [x, y] = mapCoords(e.clientX, e.clientY);
+          const btn = e.button === 0 ? 'left' : e.button === 1 ? 'middle' : 'right';
+          sendMouse({ x, y, button: btn, down: true, frame_w: width, frame_h: height });
+          e.preventDefault();
+        }}
+        onMouseUp={(e) => {
+          if (!imgRef.current) return;
+          const [x, y] = mapCoords(e.clientX, e.clientY);
+          const btn = e.button === 0 ? 'left' : e.button === 1 ? 'middle' : 'right';
+          sendMouse({ x, y, button: btn, down: false, frame_w: width, frame_h: height });
+          e.preventDefault();
+        }}
+        onMouseMove={(e) => {
+          showControls();
+          if (!imgRef.current) return;
+          const [x, y] = mapCoords(e.clientX, e.clientY);
+          sendMouse({ x, y, frame_w: width, frame_h: height });
+        }}
+        onWheel={(e) => {
+          sendMouse({ wheel_x: e.deltaX, wheel_y: e.deltaY, frame_w: width, frame_h: height });
+          e.preventDefault();
+        }}
+        onKeyDown={(e) => {
+          const text = e.key.length === 1 ? e.key : undefined;
+          sendKey({ key: e.key, text, down: true });
+          e.preventDefault();
+        }}
+        onKeyUp={(e) => {
+          const text = e.key.length === 1 ? e.key : undefined;
+          sendKey({ key: e.key, text, down: false });
+          e.preventDefault();
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {/* Stream */}
+        {connected && (
+          <img
+            ref={imgRef}
+            src={streamUrl}
+            alt=""
+            className="w-full h-full object-contain"
+            draggable={false}
+          />
+        )}
+
+        {/* Floating Controls - appears on mouse move */}
+        <div className={`fixed top-0 left-0 right-0 transition-all duration-300 ${controlsVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
+          <div className="flex justify-center pt-2">
+            <div className="bg-black/80 backdrop-blur-sm rounded-full px-2 py-1 flex items-center gap-1 border border-gray-700/50">
+              {/* Connection indicator */}
+              <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-white font-medium">{server.replace(/^https?:\/\//, '').split(':')[0]}</span>
+              </div>
+              
+              <div className="w-px h-6 bg-gray-700" />
+              
+              {/* Fullscreen */}
+              <button
+                onClick={toggleFullscreen}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                title={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+              >
+                {fullscreen ? (
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"/>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/>
+                  </svg>
+                )}
+              </button>
+              
+              {/* Disconnect */}
+              <button
+                onClick={disconnect}
+                className="p-2 hover:bg-red-500/20 rounded-full transition-colors"
+                title="Disconnect"
+              >
+                <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
-      </header>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Left sidebar - Controls */}
-          <div className="lg:col-span-1 space-y-4">
-            {/* Connection */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Connection</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Server URL</label>
-                  <input
-                    type="text"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                    placeholder="http://127.0.0.1:8082"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Auth Token</label>
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                    placeholder="Optional bearer token"
-                  />
-                </div>
-                <button
-                  onClick={fetchStatus}
-                  className="w-full bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                >
-                  Refresh Status
-                </button>
-              </div>
-            </div>
-
-            {/* Server Registry */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Saved Servers</h2>
-              <div className="space-y-2">
-                {servers.map((s, i) => (
-                  <div key={i} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedServer === i ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-slate-900/50 hover:bg-slate-700/50'
-                  }`}>
-                    <button onClick={() => loadServer(i)} className="flex-1 text-left text-sm truncate">{s.name}</button>
-                    <button onClick={() => removeServer(i)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                  </div>
-                ))}
-                <div className="flex gap-2 mt-2">
-                  <input
-                    type="text"
-                    value={newServerName}
-                    onChange={(e) => setNewServerName(e.target.value)}
-                    className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                    placeholder="Server name"
-                  />
-                  <button onClick={addServer} className="bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
-                    Add
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Display Selection */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Display</h2>
-              <div className="space-y-2">
-                {displays.length === 0 ? (
-                  <p className="text-xs text-slate-500">No displays detected</p>
-                ) : displays.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => handleSelectDisplay(d.id)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${
-                      selectedDisplay === d.id ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-slate-900/50 hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <div className="w-8 h-6 bg-slate-700 rounded border border-slate-600 flex items-center justify-center text-xs">
-                      {d.id}
-                    </div>
-                    <div className="flex-1 text-xs">
-                      <div className="font-medium">{d.width}×{d.height}</div>
-                      <div className="text-slate-500">Position: {d.x}, {d.y}</div>
-                    </div>
-                    {d.is_main && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">Main</span>}
-                  </button>
-                ))}
-                <button onClick={fetchDisplays} className="w-full bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-4 py-2 text-xs font-medium transition-colors">
-                  Refresh Displays
-                </button>
-              </div>
-            </div>
-
-            {/* Stream Quality */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Stream Quality</h2>
-              <div className="grid grid-cols-4 gap-2 mb-4">
-                {(['low', 'medium', 'high', 'ultra'] as const).map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => applyPreset(preset)}
-                    className="bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-2 py-1.5 text-xs font-medium capitalize transition-colors"
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Width</label>
-                  <input
-                    type="number"
-                    value={width}
-                    onChange={(e) => setWidth(Number(e.target.value))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Height</label>
-                  <input
-                    type="number"
-                    value={height}
-                    onChange={(e) => setHeight(Number(e.target.value))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">FPS</label>
-                  <input
-                    type="number"
-                    value={fps}
-                    onChange={(e) => setFps(Number(e.target.value))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Quality</label>
-                  <input
-                    type="number"
-                    value={quality}
-                    onChange={(e) => setQuality(Number(e.target.value))}
-                    min={30}
-                    max={95}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main content - Stream viewer */}
-          <div className="lg:col-span-3 space-y-4">
-            {/* Controls bar */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 flex flex-wrap items-center gap-3">
-              <button
-                onClick={handleStart}
-                disabled={status === 'running'}
-                className="bg-green-600 hover:bg-green-500 disabled:bg-green-600/50 disabled:cursor-not-allowed text-white rounded-lg px-6 py-2.5 font-medium transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
-                Start
-              </button>
-              <button
-                onClick={handleStop}
-                disabled={status !== 'running'}
-                className="bg-red-600 hover:bg-red-500 disabled:bg-red-600/50 disabled:cursor-not-allowed text-white rounded-lg px-6 py-2.5 font-medium transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M5.25 3A2.25 2.25 0 003 5.25v9.5A2.25 2.25 0 005.25 17h9.5A2.25 2.25 0 0017 14.75v-9.5A2.25 2.25 0 0014.75 3h-9.5z"/></svg>
-                Stop
-              </button>
-              <div className="h-8 w-px bg-slate-600" />
-              <button
-                onClick={() => setRemoteControl(!remoteControl)}
-                className={`rounded-lg px-4 py-2.5 font-medium transition-colors flex items-center gap-2 ${
-                  remoteControl ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/></svg>
-                Remote Control {remoteControl ? 'ON' : 'OFF'}
-              </button>
-              <div className="h-8 w-px bg-slate-600" />
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-400">Consent:</span>
-                <button
-                  onClick={handleAllow}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    consentAllowed ? 'bg-green-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                  }`}
-                >
-                  Allow
-                </button>
-                <button
-                  onClick={handleDeny}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    !consentAllowed ? 'bg-red-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                  }`}
-                >
-                  Deny
-                </button>
-              </div>
-            </div>
-
-            {/* Stream viewer */}
-            <div
-              ref={containerRef}
-              className={`relative bg-black rounded-xl overflow-hidden border border-slate-700 ${remoteControl ? 'cursor-crosshair' : ''}`}
-              style={{ aspectRatio: `${width}/${height}` }}
-              tabIndex={0}
-              onMouseDown={(e) => {
-                if (!remoteControl || !imgRef.current) return;
-                const [x, y] = mapCoords(e.clientX, e.clientY);
-                const btn = e.button === 0 ? 'left' : e.button === 1 ? 'middle' : 'right';
-                sendMouse({ x, y, button: btn, down: true, frame_w: width, frame_h: height, display_id: selectedDisplay });
-                e.preventDefault();
-              }}
-              onMouseUp={(e) => {
-                if (!remoteControl || !imgRef.current) return;
-                const [x, y] = mapCoords(e.clientX, e.clientY);
-                const btn = e.button === 0 ? 'left' : e.button === 1 ? 'middle' : 'right';
-                sendMouse({ x, y, button: btn, down: false, frame_w: width, frame_h: height, display_id: selectedDisplay });
-                e.preventDefault();
-              }}
-              onMouseMove={(e) => {
-                if (!remoteControl || !imgRef.current) return;
-                const [x, y] = mapCoords(e.clientX, e.clientY);
-                sendMouse({ x, y, frame_w: width, frame_h: height, display_id: selectedDisplay });
-              }}
-              onWheel={(e) => {
-                if (!remoteControl) return;
-                sendMouse({ wheel_x: e.deltaX, wheel_y: e.deltaY, frame_w: width, frame_h: height, display_id: selectedDisplay });
-                e.preventDefault();
-              }}
-              onKeyDown={(e) => {
-                if (!remoteControl) return;
-                const text = e.key.length === 1 ? e.key : undefined;
-                sendKey({ key: e.key, text, down: true });
-                e.preventDefault();
-              }}
-              onKeyUp={(e) => {
-                if (!remoteControl) return;
-                const text = e.key.length === 1 ? e.key : undefined;
-                sendKey({ key: e.key, text, down: false });
-                e.preventDefault();
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-            >
-              {status === 'running' ? (
-                <img
-                  ref={imgRef}
-                  src={streamUrl}
-                  alt="Remote desktop stream"
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
-                  <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                  </svg>
-                  <p className="text-lg font-medium">Stream Offline</p>
-                  <p className="text-sm">Click Start to begin streaming</p>
-                </div>
-              )}
-              {!remoteControl && status === 'running' && (
-                <div className="absolute inset-0 bg-black/30 flex items-center justify-center pointer-events-none">
-                  <div className="bg-slate-900/90 backdrop-blur-sm px-6 py-3 rounded-lg border border-slate-600 text-sm">
-                    Remote Control is OFF
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Clipboard */}
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Clipboard Sync</h2>
-              <div className="flex gap-3">
-                <textarea
-                  value={clipboard}
-                  onChange={(e) => setClipboard(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none resize-none"
-                  rows={2}
-                  placeholder="Clipboard content..."
-                />
-                <div className="flex flex-col gap-2">
-                  <button
-                    onClick={handleReadClipboard}
-                    className="bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                  >
-                    Read
-                  </button>
-                  <button
-                    onClick={handleWriteClipboard}
-                    className="bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                  >
-                    Write
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* QUIC Status */}
-            {ctrlStatus && (
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">QUIC Control Channel</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-slate-900/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500">Status</div>
-                    <div className={`text-lg font-semibold ${ctrlStatus.connected ? 'text-green-400' : 'text-red-400'}`}>
-                      {ctrlStatus.connected ? 'Connected' : 'Disconnected'}
-                    </div>
-                  </div>
-                  <div className="bg-slate-900/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500">Reconnects</div>
-                    <div className="text-lg font-semibold text-white">{ctrlStatus.reconnects}</div>
-                  </div>
-                  <div className="bg-slate-900/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500">Attempts</div>
-                    <div className="text-lg font-semibold text-white">{ctrlStatus.attempts}</div>
-                  </div>
-                  <div className="bg-slate-900/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500">Ping Interval</div>
-                    <div className="text-lg font-semibold text-white">{ctrlStatus.ping_interval_secs || '-'}s</div>
-                  </div>
-                </div>
-                {ctrlStatus.last_error && (
-                  <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                    <div className="text-xs text-red-400 font-medium">Last Error</div>
-                    <div className="text-sm text-red-300">{ctrlStatus.last_error}</div>
-                  </div>
-                )}
-              </div>
-            )}
+        {/* Keyboard hint */}
+        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${controlsVisible ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-1.5 text-xs text-gray-400">
+            Press <kbd className="bg-gray-700 px-1.5 py-0.5 rounded text-white mx-1">Esc</kbd> to show controls
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  // ============ TERMINAL VIEW ============
+  if (view === 'terminal') {
+    return (
+      <div
+        ref={containerRef}
+        className="fixed inset-0 bg-black flex flex-col"
+        onMouseMove={showControls}
+      >
+        {/* Top bar */}
+        <div className={`flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-b border-gray-800 transition-all duration-300 ${controlsVisible ? 'opacity-100' : 'opacity-70'}`}>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+            </div>
+            <span className="text-sm text-gray-400 font-mono">{server.replace(/^https?:\/\//, '')} — shell</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleFullscreen}
+              className="p-1.5 hover:bg-white/10 rounded transition-colors"
+            >
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+              </svg>
+            </button>
+            <button
+              onClick={disconnect}
+              className="p-1.5 hover:bg-red-500/20 rounded transition-colors"
+            >
+              <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Terminal content - shows server has no display message */}
+        <div className="flex-1 p-4 font-mono text-sm overflow-auto">
+          <div className="text-green-400">Connected to {server.replace(/^https?:\/\//, '')}</div>
+          <div className="text-gray-500 mt-2">Server is running in headless mode (no display)</div>
+          <div className="text-gray-500">Terminal access requires SSH or a PTY endpoint.</div>
+          <div className="mt-4 text-gray-400">
+            <span className="text-cyan-400">$</span> <span className="animate-pulse">_</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
