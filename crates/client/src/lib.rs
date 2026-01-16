@@ -691,6 +691,28 @@ pub mod http_ui {
                     Response::builder().status(StatusCode::NO_CONTENT).body(Full::new(Bytes::new()).boxed()).unwrap()
                 }
             },
+            (&Method::GET, p) if static_dir.is_some() => {
+                // Try to serve static file for any GET path
+                let rel = p.trim_start_matches('/');
+                if rel.is_empty() || rel.contains("..") {
+                    Response::builder().status(StatusCode::NOT_FOUND).body(Full::new(Bytes::new()).boxed()).unwrap()
+                } else {
+                    let dir = static_dir.as_ref().unwrap();
+                    match serve_static(dir, rel).await {
+                        Ok((body, content_type)) => {
+                            let cache = if rel.ends_with(".js") || rel.ends_with(".wasm") { "public, max-age=604800, immutable" } else { "no-store" };
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", content_type)
+                                .header(hyper::header::CACHE_CONTROL, cache)
+                                .body(Full::new(body).boxed())
+                                .unwrap()
+                        }
+                        Err(StatusCode::NOT_FOUND) => Response::builder().status(StatusCode::NOT_FOUND).body(Full::new(Bytes::new()).boxed()).unwrap(),
+                        Err(_) => Response::builder().status(StatusCode::INTERNAL_SERVER_ERROR).body(Full::new(Bytes::new()).boxed()).unwrap(),
+                    }
+                }
+            },
             _ => Response::builder().status(StatusCode::NOT_FOUND).body(Full::new(Bytes::new()).boxed()).unwrap(),
         };
         // Attach CORS based on allowlist and add security headers
@@ -699,7 +721,7 @@ pub mod http_ui {
         headers.insert(hyper::header::HeaderName::from_static("x-content-type-options"), "nosniff".parse().unwrap());
         headers.insert(
             hyper::header::CONTENT_SECURITY_POLICY,
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
                 .parse()
                 .unwrap(),
         );

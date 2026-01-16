@@ -33,7 +33,7 @@ pub fn App() -> impl IntoView {
     // Consent and control status
     let (consent_allowed, set_consent_allowed) = create_signal(false);
     let (ctrl_json, set_ctrl_json) = create_signal(String::from("null"));
-    #[derive(Clone, Debug, serde::Deserialize, Default)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
     struct CtrlConfig {
         connected: bool,
         last_disconnect: Option<String>,
@@ -48,7 +48,7 @@ pub fn App() -> impl IntoView {
         backoff_max_ms: Option<u64>,
         tls: Option<CtrlTls>,
     }
-    #[derive(Clone, Debug, serde::Deserialize, Default)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
     struct CtrlTls { mode: String, sni: Option<String>, pin_sha256_hex: Option<String>, ca_pem_len: Option<usize> }
     #[derive(Clone, Debug, serde::Deserialize)]
     struct CtrlConfigResponse { ctrl: Option<CtrlConfig> }
@@ -79,16 +79,16 @@ pub fn App() -> impl IntoView {
         use web_sys::window;
         if let Some(win) = window() {
             if let Ok(Some(storage)) = win.local_storage() {
-                if let Ok(Ok(val)) = storage.get_item("quicview.base_url").map(|x| x.ok_or_default()) { if !val.is_empty() { set_base_url.set(val); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.token").map(|x| x.ok_or_default()) { if !val.is_empty() { set_token.set(val); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.w").map(|x| x.ok_or_default()) { if let Ok(n) = val.parse() { set_w.set(n); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.h").map(|x| x.ok_or_default()) { if let Ok(n) = val.parse() { set_h.set(n); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.fps").map(|x| x.ok_or_default()) { if let Ok(n) = val.parse() { set_fps.set(n); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.q").map(|x| x.ok_or_default()) { if let Ok(n) = val.parse() { set_q.set(n); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.rc.enabled").map(|x| x.ok_or_default()) { if val == "1" { set_rc_enabled.set(true); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.display.id").map(|x| x.ok_or_default()) { if let Ok(n) = val.parse::<u32>() { set_selected_display.set(Some(n)); } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.servers").map(|x| x.ok_or_default()) { if !val.is_empty() { if let Ok(list) = serde_json::from_str::<Vec<ServerEntry>>(&val) { set_servers.set(list); } } }
-                if let Ok(Ok(val)) = storage.get_item("quicview.servers.selected").map(|x| x.ok_or_default()) { if let Ok(idx) = val.parse::<usize>() { set_selected_server.set(Some(idx)); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.base_url") { if !val.is_empty() { set_base_url.set(val); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.token") { if !val.is_empty() { set_token.set(val); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.w") { if let Ok(n) = val.parse::<u32>() { set_w.set(n); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.h") { if let Ok(n) = val.parse::<u32>() { set_h.set(n); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.fps") { if let Ok(n) = val.parse::<u32>() { set_fps.set(n); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.q") { if let Ok(n) = val.parse::<u8>() { set_q.set(n); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.rc.enabled") { if val == "1" { set_rc_enabled.set(true); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.display.id") { if let Ok(n) = val.parse::<u32>() { set_selected_display.set(Some(n)); } }
+                if let Ok(Some(val)) = storage.get_item("quicview.servers") { if !val.is_empty() { if let Ok(list) = serde_json::from_str::<Vec<ServerEntry>>(&val) { set_servers.set(list); } } }
+                if let Ok(Some(val)) = storage.get_item("quicview.servers.selected") { if let Ok(idx) = val.parse::<usize>() { set_selected_server.set(Some(idx)); } }
             }
             if let Ok(loc) = win.location().hash() {
                 if let Some(pos) = loc.find("token=") {
@@ -198,8 +198,10 @@ pub fn App() -> impl IntoView {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn map_coords(client_x: f64, client_y: f64, img_el: &web_sys::HtmlElement, w: u32, h: u32) -> (f64, f64) {
-        let rect = img_el.get_bounding_client_rect();
+    fn map_coords(client_x: f64, client_y: f64, img_el: &web_sys::HtmlImageElement, w: u32, h: u32) -> (f64, f64) {
+        use wasm_bindgen::JsCast;
+        let el: &web_sys::HtmlElement = img_el.unchecked_ref();
+        let rect = el.get_bounding_client_rect();
         let rx = client_x - rect.left();
         let ry = client_y - rect.top();
         let disp_w = rect.width().max(1.0);
@@ -256,7 +258,7 @@ pub fn App() -> impl IntoView {
                     if rc_enabled.get() {
                         use wasm_bindgen::JsCast;
                         if let Some(div) = overlay_ref.get() {
-                            let el = div.as_ref().dyn_ref::<web_sys::Element>().unwrap().clone();
+                            let el: &web_sys::Element = div.unchecked_ref();
                             let _ = el.request_pointer_lock();
                         }
                     }
@@ -265,7 +267,7 @@ pub fn App() -> impl IntoView {
                 on:pointerdown=move |e| {
                     if !rc_enabled.get() { return; }
                     let Some(img) = img_ref.get() else { return; };
-                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, img.as_ref(), w.get(), h.get());
+                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, &img, w.get(), h.get());
                     let btn = match e.button() { 0 => Some("left"), 1 => Some("middle"), 2 => Some("right"), _ => None };
                     let did = selected_display.get();
                     if let Some(b) = btn { send_mouse(serde_json::json!({"x": x, "y": y, "button": b, "down": true, "frame_w": w.get(), "frame_h": h.get(), "display_id": did })); }
@@ -274,7 +276,7 @@ pub fn App() -> impl IntoView {
                 on:pointerup=move |e| {
                     if !rc_enabled.get() { return; }
                     let Some(img) = img_ref.get() else { return; };
-                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, img.as_ref(), w.get(), h.get());
+                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, &img, w.get(), h.get());
                     let btn = match e.button() { 0 => Some("left"), 1 => Some("middle"), 2 => Some("right"), _ => None };
                     let did = selected_display.get();
                     if let Some(b) = btn { send_mouse(serde_json::json!({"x": x, "y": y, "button": b, "down": false, "frame_w": w.get(), "frame_h": h.get(), "display_id": did })); }
@@ -283,7 +285,7 @@ pub fn App() -> impl IntoView {
                 on:pointermove=move |e| {
                     if !rc_enabled.get() { return; }
                     let Some(img) = img_ref.get() else { return; };
-                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, img.as_ref(), w.get(), h.get());
+                    let (x, y) = map_coords(e.client_x() as f64, e.client_y() as f64, &img, w.get(), h.get());
                     let did = selected_display.get();
                     send_mouse(serde_json::json!({"x": x, "y": y, "frame_w": w.get(), "frame_h": h.get(), "display_id": did }));
                     e.prevent_default();
@@ -582,8 +584,8 @@ pub fn App() -> impl IntoView {
 
         <div style="position: relative; border: 1px solid #ddd; display: inline-block; user-select: none;">
                 <img src=stream_src alt="MJPEG stream" style="max-width: 100%; display: block;" node_ref=img_ref
-            on:load=move |_| { #[cfg(target_arch = "wasm32")] { if let Some(img) = img_ref.get() { let rect = img.as_ref().get_bounding_client_rect(); set_disp_w.set(rect.width()); set_disp_h.set(rect.height()); } } }
-            on:resize=move |_| { #[cfg(target_arch = "wasm32")] { if let Some(img) = img_ref.get() { let rect = img.as_ref().get_bounding_client_rect(); set_disp_w.set(rect.width()); set_disp_h.set(rect.height()); } } }
+            on:load=move |_| { #[cfg(target_arch = "wasm32")] { use wasm_bindgen::JsCast; if let Some(img) = img_ref.get() { let el: &web_sys::HtmlElement = img.unchecked_ref(); let rect = el.get_bounding_client_rect(); set_disp_w.set(rect.width()); set_disp_h.set(rect.height()); } } }
+            on:resize=move |_| { #[cfg(target_arch = "wasm32")] { use wasm_bindgen::JsCast; if let Some(img) = img_ref.get() { let el: &web_sys::HtmlElement = img.unchecked_ref(); let rect = el.get_bounding_client_rect(); set_disp_w.set(rect.width()); set_disp_h.set(rect.height()); } } }
                 />
                 {overlay_view}
                 <Show when=move || !rc_enabled.get()>
