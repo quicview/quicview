@@ -1,0 +1,19 @@
+[package]
+name = "quicview-codec"
+description = "Frame encoding, decoding, and pixel format conversion for QuicView"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+quicview-protocol.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "codec_bench"
+harness = false

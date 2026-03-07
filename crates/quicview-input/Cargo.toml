@@ -1,0 +1,15 @@
+[package]
+name = "quicview-input"
+description = "Input event injection and forwarding for QuicView"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+quicview-protocol.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "macros"] }

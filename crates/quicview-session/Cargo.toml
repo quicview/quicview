@@ -1,0 +1,17 @@
+[package]
+name = "quicview-session"
+description = "Session control plane: roles, auth, negotiation, and display layout for QuicView"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+quicview-protocol.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "macros"] }
+serde_json.workspace = true

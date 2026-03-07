@@ -1,34 +1,19 @@
-# cargo-deny configuration for QuicView
-# Initially permissive; tighten over time as the dependency tree stabilizes.
-
-[graph]
-# Avoid dev-deps to keep initial noise down; enable later if needed.
-all-features = true
-
 [advisories]
-# Fetch the advisory DB and check for vulnerabilities.
-# Non-blocking initially; CI job uses continue-on-error.
-ignore = []
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
 
 [licenses]
-# Allow common permissive licenses. Do not vendor AGPL code into this workspace.
-allow = [
-  "Apache-2.0",
-  "MIT",
-  "BSD-3-Clause",
-  "BSD-2-Clause",
-  "ISC",
-  "Unicode-DFS-2016",
-  "Zlib",
-  "OpenSSL",
-]
-# Disallow GPL variants by default in first-party crates.
-# We can add exceptions via exceptions table if needed.
+unlicensed = "deny"
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0"]
 
 [bans]
-# Detect duplicate versions; warn first.
 multiple-versions = "warn"
+wildcards = "deny"
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

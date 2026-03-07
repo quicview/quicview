@@ -1,0 +1,30 @@
+[package]
+name = "quicview"
+description = "QUIC-native visual streaming runtime — remote desktop, video calls, and infinite display extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+quicview-protocol.workspace = true
+quicview-codec.workspace = true
+quicview-capture.workspace = true
+quicview-display.workspace = true
+quicview-input.workspace = true
+quicview-session.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["full", "macros"] }
+criterion.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+
+[[bench]]
+name = "quicview_bench"
+harness = false
