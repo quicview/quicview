@@ -20,4 +20,7 @@ pub enum QuicViewError {
 
     #[error("session error: {0}")]
     Session(#[from] quicview_session::SessionError),
+
+    #[error("transport error: {0}")]
+    Transport(#[from] quicview_transport::TransportError),
 }
