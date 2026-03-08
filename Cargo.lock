@@ -793,6 +793,7 @@ dependencies = [
  "quicview-protocol",
  "quinn",
  "rcgen",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

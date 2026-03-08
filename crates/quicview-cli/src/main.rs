@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use quicview_transport::{QuicConnection, QuicListener, SelfSignedCert, StreamKind};
+use quicview_transport::{QuicConnection, QuicListener, SelfSignedCert, StreamKind, MAX_CONTROL_MESSAGE_SIZE};
 
 #[derive(Parser)]
 #[command(name = "quicview", version, about = "QUIC-native visual streaming runtime")]
@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bind_addr = bind.unwrap_or_else(|| config.bind_addr());
             let addr = bind_addr.parse()?;
             let cert = SelfSignedCert::generate(&["localhost"])?;
+            tracing::info!(fingerprint = %cert.fingerprint().to_hex(), "server certificate fingerprint");
             let listener = QuicListener::bind(addr, &cert)?;
             let local = listener.local_addr()?;
             tracing::info!(%local, "host listening — waiting for viewers");
@@ -138,10 +139,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             send.write_all(&payload).await?;
             tracing::info!("sent ping");
 
-            // Read response.
+            // Read response with size limit.
             let mut len_buf = [0u8; 4];
             recv.read_exact(&mut len_buf).await?;
             let len = u32::from_be_bytes(len_buf) as usize;
+            if len > MAX_CONTROL_MESSAGE_SIZE {
+                return Err(format!("control response too large: {len} bytes").into());
+            }
             let mut buf = vec![0u8; len];
             recv.read_exact(&mut buf).await?;
             let msg: quicview_protocol::ControlMessage = serde_json::from_slice(&buf)?;
@@ -185,10 +189,13 @@ async fn handle_viewer(
 
     match kind {
         StreamKind::Control => {
-            // Read length-prefixed control messages.
+            // Read length-prefixed control messages with size limit.
             let mut len_buf = [0u8; 4];
             recv.read_exact(&mut len_buf).await?;
             let len = u32::from_be_bytes(len_buf) as usize;
+            if len > MAX_CONTROL_MESSAGE_SIZE {
+                return Err(format!("control message too large: {len} bytes (max {MAX_CONTROL_MESSAGE_SIZE})").into());
+            }
             let mut buf = vec![0u8; len];
             recv.read_exact(&mut buf).await?;
 

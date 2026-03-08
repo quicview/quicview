@@ -38,6 +38,7 @@ thiserror = "2"
 quinn = "0.11"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = "0.13"
+ring = "0.17"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

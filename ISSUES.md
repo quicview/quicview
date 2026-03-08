@@ -64,7 +64,7 @@ Tracking issues for the QuicView workspace.
 - [x] QV-040: Prometheus metrics endpoint
 - [x] QV-041: Configuration file support (TOML)
 - [x] QV-042: Graceful shutdown & reconnection
-- [ ] QV-043: Security audit
-- [ ] QV-044: Documentation site
+- [x] QV-043: Security audit
+- [x] QV-044: Documentation site
 - [ ] QV-045: Publish to crates.io
-- [ ] QV-046: Release automation
+- [x] QV-046: Release automation
